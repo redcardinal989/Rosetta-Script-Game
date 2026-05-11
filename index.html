@@ -1,11 +1,60 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Rosetta Script</title>
+    <title>20 Minutes Until JS</title>
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser-arcade-physics.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=VT323&display=swap');
+
+        body { margin: 0; background: #050505; color: #fff; font-family: 'VT323', monospace; overflow: hidden; }
+        #game-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+
+        /* UI Overlays */
+        .overlay {
+            position: absolute; width: 100%; height: 100%;
+            display: flex; flex-direction: column;
+            justify-content: center; align-items: center;
+            background: rgba(5, 5, 5, 0.9); z-index: 100;
+        }
+
+        h1 { font-size: 70px; color: #ff0033; text-shadow: 0 0 15px #ff0033; margin: 0; }
+        button {
+            background: transparent; color: #fff; border: 2px solid #fff;
+            padding: 10px 30px; font-family: 'VT323', monospace; font-size: 28px;
+            cursor: pointer; margin-top: 20px; transition: 0.2s;
+        }
+        button:hover { background: #fff; color: #000; box-shadow: 0 0 20px #fff; }
+        .hidden { display: none !important; }
+
+        /* HUD */
+        #hud {
+            position: absolute; top: 20px; left: 20px; z-index: 50;
+            pointer-events: none; width: 100%;
+        }
+        .stats-text { font-size: 24px; color: #ff0033; }
+        #health-container { width: 200px; height: 10px; background: #333; margin-top: 5px; border: 1px solid #fff; }
+        #health-fill { width: 100%; height: 100%; background: #00ff00; transition: width 0.2s; }
+    </style>
 </head>
 <body>
-    
+    <div id="game-container"></div>
+
+    <div id="hud" class="hidden">
+        <div class="stats-text">KILLS: <span id="killCount">0</span></div>
+        <div id="health-container"><div id="health-fill"></div></div>
+    </div>
+
+    <div id="startScreen" class="overlay">
+        <h1>20 MINUTES UNTIL JS</h1>
+        <button onclick="startGame()">START RUN</button>
+    </div>
+
+    <div id="levelUpScreen" class="overlay hidden">
+        <h1 style="color:#00ff00; text-shadow: 0 0 10px #00ff00;">EVOLVE</h1>
+        <button onclick="applyPowerUp('heal')">REPAIR (Full Heal)</button>
+        <button onclick="applyPowerUp('speed')">ADRENALINE (-20% CD)</button>
+    </div>
+
+    <script src="script.js"></script>
 </body>
 </html>

@@ -1,0 +1,129 @@
+/* Core Styling */
+body {
+    margin: 0;
+    background: #050505;
+    overflow: hidden;
+    color: #fff;
+    /* VT323 is perfect for that 20UTD retro-pixel look */
+    font-family: 'VT323', 'Courier New', Courier, monospace;
+}
+
+/* Phaser Canvas Container */
+#game-container {
+    width: 100vw;
+    height: 100vh;
+    position: absolute;
+    top: 0;
+    left: 0;
+}
+
+/* UI Layer sits on top of Canvas */
+#ui-layer {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 10;
+}
+
+/* Overlays (Menus) */
+.overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(5, 5, 5, 0.9); /* Slightly transparent dark */
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    z-index: 100;
+    pointer-events: all; /* Important for clicking buttons */
+}
+
+.hidden { display: none !important; }
+
+h1 { 
+    font-size: 80px;
+    color: #ff0033; 
+    letter-spacing: 5px; 
+    text-shadow: 0 0 20px #ff0033;
+    margin: 0 0 20px 0;
+}
+
+/* HUD elements */
+#hud {
+    position: absolute;
+    top: 30px;
+    left: 30px;
+    pointer-events: none;
+}
+
+.stats-text {
+    margin-bottom: 5px;
+    font-size: 28px;
+    font-weight: bold;
+    color: #ff0033;
+    text-shadow: 0 0 5px #000;
+}
+
+#health-container {
+    width: 250px;
+    height: 12px;
+    background: #1a1a1a;
+    border: 1px solid #fff;
+    box-shadow: 0 0 10px rgba(0,0,0,1);
+}
+
+#health-fill {
+    width: 100%;
+    height: 100%;
+    background: #00ff00; /* Neon Green */
+    box-shadow: 0 0 10px #00ff00;
+    transition: width 0.3s ease-out;
+}
+
+/* Buttons (20UTD Style) */
+button {
+    padding: 15px 40px;
+    border: 2px solid #fff;
+    background: transparent;
+    color: #fff;
+    cursor: pointer;
+    margin: 10px;
+    font-family: inherit;
+    font-size: 24px;
+    transition: all 0.2s ease;
+}
+
+button:hover {
+    background: #fff;
+    color: #000;
+    box-shadow: 0 0 20px #fff;
+    transform: scale(1.05);
+}
+
+button small {
+    display: block;
+    font-size: 14px;
+    opacity: 0.8;
+}
+
+.weapon-grid { 
+    display: flex; 
+    gap: 15px; 
+    margin-top: 20px;
+}
+
+/* Critical Health Pulse */
+.critical {
+    animation: pulse 0.5s infinite alternate;
+}
+
+@keyframes pulse {
+    from { filter: brightness(1) drop-shadow(0 0 2px #f00); }
+    to { filter: brightness(1.5) drop-shadow(0 0 15px #f00); }
+}

@@ -72,9 +72,19 @@
     <div id="inventory-modal" class="relic-modal hidden" onclick="closeInventoryOnBackdrop(event)">
         <div class="relic-modal-content inventory-content">
             <h2 id="inventory-title" style="color:#00ff99; text-shadow:0 0 10px #00ff99; margin:0 0 5px 0;">🎒 RELIC INVENTORY</h2>
-            <p style="font-size:14px; color:#aaa; margin:0 0 20px 0;">Hover a relic to see its effect</p>
+            <p style="font-size:14px; color:#aaa; margin:0 0 20px 0;">Click a relic to read its full description.</p>
             <div id="inventory-grid" class="inventory-grid"></div>
             <button onclick="closeInventoryModal()" style="margin-top:20px; border-color:#00ff99; color:#00ff99;">CLOSE</button>
+        </div>
+    </div>
+
+    <!-- Relic Detail Modal -->
+    <div id="inventory-detail-modal" class="relic-modal hidden" onclick="closeInventoryDetailOnBackdrop(event)">
+        <div class="relic-modal-content inventory-detail-content">
+            <div id="detail-modal-icon" class="modal-icon">?</div>
+            <h2 id="detail-modal-title">RELIC DETAILS</h2>
+            <p id="detail-modal-description"></p>
+            <button onclick="closeInventoryDetailModal()">CLOSE</button>
         </div>
     </div>
 

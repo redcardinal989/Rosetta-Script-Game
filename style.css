@@ -405,6 +405,11 @@ button small {
 .inventory-grid::-webkit-scrollbar-track { background: #111; }
 .inventory-grid::-webkit-scrollbar-thumb { background: #00ff99; border-radius: 3px; }
 
+.inventory-detail-content {
+    max-width: 480px !important;
+    width: 90vw;
+}
+
 .inv-relic-card {
     background: rgba(255,255,255,0.05);
     border: 1px solid;
@@ -412,7 +417,7 @@ button small {
     padding: 12px 8px;
     text-align: center;
     transition: transform 0.2s, background 0.2s;
-    cursor: default;
+    cursor: pointer;
     position: relative;
 }
 .inv-relic-card:hover {

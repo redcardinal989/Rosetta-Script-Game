@@ -734,6 +734,7 @@ function openRelicInventory() {
         relics.forEach(relic => {
             const card = document.createElement('div');
             card.className = 'inv-relic-card';
+            card.title = 'Click for more info';
             const hex = '#' + (relic.color || relic.glowColor || 0x00ff99).toString(16).padStart(6, '0');
             const glowCol = relic.glowColor || hex;
             card.style.borderColor = glowCol;
@@ -743,12 +744,30 @@ function openRelicInventory() {
                 <div class="inv-relic-name">${relic.name}</div>
                 <div class="inv-relic-desc">${relic.description}</div>
             `;
+            card.addEventListener('click', () => openRelicDetailModal(relic));
             grid.appendChild(card);
         });
     }
 
     document.getElementById('inventory-modal').classList.remove('hidden');
 }
+
+function openRelicDetailModal(relic) {
+    const modal = document.getElementById('inventory-detail-modal');
+    document.getElementById('detail-modal-icon').innerText = relic.icon || '?';
+    document.getElementById('detail-modal-title').innerText = relic.name || 'RELIC DETAILS';
+    document.getElementById('detail-modal-description').innerText = relic.description || 'No description available.';
+    modal.classList.remove('hidden');
+}
+
+function closeInventoryDetailModal() {
+    document.getElementById('inventory-detail-modal').classList.add('hidden');
+}
+
+function closeInventoryDetailOnBackdrop(e) {
+    if (e.target === document.getElementById('inventory-detail-modal')) closeInventoryDetailModal();
+}
+
 
 function closeInventoryModal() {
     document.getElementById('inventory-modal').classList.add('hidden');

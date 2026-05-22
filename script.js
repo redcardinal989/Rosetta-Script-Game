@@ -101,7 +101,73 @@ function generateWaveConfigs() {
 }
 
 const waveConfigs = generateWaveConfigs();
+// --- MISSING RELIC LOGIC & DATA STRUCTURES ---
 
+/**
+ * Determines if an enemy drops a relic on death.
+ * @returns {boolean} 20% drop rate
+ */
+function shouldDropRelic() {
+    return Math.random() < 0.20; 
+}
+
+/**
+ * Repository of relic blueprints with their scaling, visual themes, and stat modifiers.
+ */
+const relicPool = [
+    {
+        name: 'Overclock Core',
+        icon: '⚡',
+        description: 'Permanent +15% attack speed.',
+        color: 0xffd700,
+        glowColor: '#ffd700',
+        effect: (player, weapon, scene) => {
+            player.reloadModifier *= 0.85;
+        }
+    },
+    {
+        name: 'Titanium Shell',
+        icon: '🛡️',
+        description: 'Increases Maximum HP by 1 and grants a shield charge.',
+        color: 0x888888,
+        glowColor: '#888888',
+        effect: (player, weapon, scene) => {
+            player.maxHp += 1;
+            player.hp += 1; // Heal for the newly added point
+            player.shieldCharges += 1;
+        }
+    },
+    {
+        name: 'Plasma Extender',
+        icon: '📏',
+        description: 'Extends attack weapon reach by +25 units.',
+        color: 0x00ffff,
+        glowColor: '#00ffff',
+        effect: (player, weapon, scene) => {
+            weapon.range += 25;
+        }
+    },
+    {
+        name: 'Siphon Circuit',
+        icon: '🧪',
+        description: 'Heals 1 HP point instantly upon pickup.',
+        color: 0x33cc33,
+        glowColor: '#33cc33',
+        effect: (player, weapon, scene) => {
+            player.hp = Math.min(player.maxHp, player.hp + 1);
+        }
+    }
+];
+
+/**
+ * Fetches a random relic. You can scale pool choices by wave index here if desired.
+ * @param {number} waveIndex 
+ */
+function getRandomRelicForWave(waveIndex) {
+    const randomIndex = Phaser.Math.Between(0, relicPool.length - 1);
+    // Return a deep copy clone so modifying instances doesn't mutate our base configuration pool
+    return { ...relicPool[randomIndex] };
+}
 class GameScene extends Phaser.Scene {
     constructor() {
         super('GameScene');
@@ -110,7 +176,7 @@ class GameScene extends Phaser.Scene {
     preload() {
         // Placeholder sounds - replace with your actual files
         this.load.audio('sword', 'https://labs.phaser.io/assets/audio/SoundEffects/squit.wav');
-        this.load.image('arena1', 'assets/backgrounds/arena1.png');
+        this.load.image('arena1', './assets/backgrounds/arena1.png');
     }
 
     create() {
@@ -137,6 +203,9 @@ class GameScene extends Phaser.Scene {
         this.player.shieldCharges = 0;
         this.player.relics = []; // Track collected relics
         this.canFire = true;
+
+        // Initialize heart display
+        setTimeout(() => updateHeartsDisplay(this.player.hp, this.player.maxHp), 100);
 
         // 2. Enemy Group
         this.enemies = this.physics.add.group();
@@ -332,9 +401,8 @@ class GameScene extends Phaser.Scene {
         // Update HUD
         this.updateRelicsDisplay();
         
-        // Update health if MaxHp changed
-        const healthPct = (this.player.hp / this.player.maxHp) * 100;
-        document.getElementById('health-fill').style.width = healthPct + "%";
+        // Update health display if MaxHp changed
+        updateHeartsDisplay(this.player.hp, this.player.maxHp);
         
         // Remove relic from world
         relicSprite.destroy();
@@ -365,21 +433,11 @@ class GameScene extends Phaser.Scene {
 
     updateRelicsDisplay() {
         const relicsContainer = document.getElementById('relics-container');
-        relicsContainer.innerHTML = '';
+        if (relicsContainer) relicsContainer.innerHTML = '';
         
-        this.player.relics.forEach(relic => {
-            const relicItem = document.createElement('div');
-            relicItem.className = 'relic-item';
-            relicItem.style.borderColor = relic.glowColor;
-            relicItem.style.boxShadow = `0 0 10px ${relic.glowColor}`;
-            
-            relicItem.innerHTML = `
-                ${relic.icon}
-                <div class="relic-item-tooltip">${relic.name}: ${relic.description}</div>
-            `;
-            
-            relicsContainer.appendChild(relicItem);
-        });
+        // Update count badge on HUD button
+        const countEl = document.getElementById('relic-count');
+        if (countEl) countEl.innerText = this.player.relics.length;
     }
 
     damageBoss(amount) {
@@ -503,9 +561,8 @@ class GameScene extends Phaser.Scene {
         this.player.hp--;
         this.player.invulnerable = true;
         
-        // Update HTML Health Bar
-        const healthPct = (this.player.hp / this.player.maxHp) * 100;
-        document.getElementById('health-fill').style.width = healthPct + "%";
+        // Update heart display
+        updateHeartsDisplay(this.player.hp, this.player.maxHp);
 
         // Red Flash Effect
         this.tweens.add({
@@ -529,8 +586,10 @@ class GameScene extends Phaser.Scene {
         this.currentWave = waveConfigs[this.waveIndex];
         this.waveKills = 0;
         this.updateWaveUI();
-        this.showEvolveScreen();
+
+        // Show grace period screen before evolve
         this.scene.pause();
+        showGracePeriod(this);
     }
 
     updateWaveUI() {
@@ -597,6 +656,11 @@ function startGame() {
     document.getElementById('startScreen').classList.add('hidden');
     document.getElementById('hud').classList.remove('hidden');
     phaserGame = new Phaser.Game(config);
+    // Hearts will be initialized after create() runs; set a small delay
+    setTimeout(() => {
+        const scene = phaserGame.scene.scenes[0];
+        if (scene && scene.player) updateHeartsDisplay(scene.player.hp, scene.player.maxHp);
+    }, 500);
 }
 
 function applyPowerUp(type) {
@@ -609,7 +673,7 @@ function applyPowerUp(type) {
 
     if (type === 'heal') {
         scene.player.hp = scene.player.maxHp;
-        document.getElementById('health-fill').style.width = '100%';
+        updateHeartsDisplay(scene.player.hp, scene.player.maxHp);
     } else if (type === 'speed') {
         scene.player.reloadModifier *= 0.8;
     } else if (type === 'range') {
@@ -640,3 +704,121 @@ function closeRelicModal() {
 document.getElementById('game-container').addEventListener('contextmenu', (e) => {
     e.preventDefault();
 });
+// ===== HEART HEALTH BAR =====
+function updateHeartsDisplay(currentHp, maxHp) {
+    const container = document.getElementById('hearts-container');
+    if (!container) return;
+    container.innerHTML = '';
+    for (let i = 0; i < maxHp; i++) {
+        const heart = document.createElement('span');
+        heart.className = 'heart' + (i >= currentHp ? ' empty' : '');
+        heart.innerText = '❤️';
+        if (i === currentHp - 1 && currentHp < maxHp) {
+            // Pulse on the heart that just got lost — actually pulse last full heart
+        }
+        container.appendChild(heart);
+    }
+}
+
+// ===== RELIC INVENTORY MODAL =====
+function openRelicInventory() {
+    const scene = phaserGame && phaserGame.scene.scenes[0];
+    const relics = scene && scene.player ? scene.player.relics : [];
+
+    const grid = document.getElementById('inventory-grid');
+    grid.innerHTML = '';
+
+    if (!relics || relics.length === 0) {
+        grid.innerHTML = '<div class="inv-empty">No relics collected yet.<br>Defeat enemies to find them!</div>';
+    } else {
+        relics.forEach(relic => {
+            const card = document.createElement('div');
+            card.className = 'inv-relic-card';
+            const hex = '#' + (relic.color || relic.glowColor || 0x00ff99).toString(16).padStart(6, '0');
+            const glowCol = relic.glowColor || hex;
+            card.style.borderColor = glowCol;
+            card.style.boxShadow = `0 0 8px ${glowCol}44`;
+            card.innerHTML = `
+                <span class="inv-relic-icon">${relic.icon || '?'}</span>
+                <div class="inv-relic-name">${relic.name}</div>
+                <div class="inv-relic-desc">${relic.description}</div>
+            `;
+            grid.appendChild(card);
+        });
+    }
+
+    document.getElementById('inventory-modal').classList.remove('hidden');
+}
+
+function closeInventoryModal() {
+    document.getElementById('inventory-modal').classList.add('hidden');
+}
+
+function closeInventoryOnBackdrop(e) {
+    if (e.target === document.getElementById('inventory-modal')) closeInventoryModal();
+}
+
+// ===== GRACE PERIOD =====
+let _graceTimer = null;
+let _graceScene = null;
+
+function showGracePeriod(scene) {
+    _graceScene = scene;
+    const prevWaveIndex = scene.waveIndex - 1;
+    const nextWave = scene.currentWave;
+
+    // Populate stats
+    document.getElementById('grace-wave-title').innerText = `WAVE ${prevWaveIndex + 1} COMPLETE`;
+    document.getElementById('grace-next-wave').innerText = `NEXT: ${nextWave.title}`;
+
+    const player = scene.player;
+    const statsEl = document.getElementById('grace-stats');
+    statsEl.innerHTML = `
+        <div class="grace-stat"><span class="grace-stat-label">KILLS</span><span class="grace-stat-value">${score}</span></div>
+        <div class="grace-stat"><span class="grace-stat-label">HP</span><span class="grace-stat-value">${player.hp} / ${player.maxHp}</span></div>
+        <div class="grace-stat"><span class="grace-stat-label">RELICS</span><span class="grace-stat-value">${player.relics.length}</span></div>
+        <div class="grace-stat"><span class="grace-stat-label">SHIELDS</span><span class="grace-stat-value">${player.shieldCharges || 0}</span></div>
+    `;
+
+    // Timer
+    let timeLeft = 10;
+    document.getElementById('grace-countdown').innerText = timeLeft;
+    document.getElementById('grace-timer-fill').style.width = '100%';
+
+    document.getElementById('graceScreen').classList.remove('hidden');
+
+    // Animate timer bar shrinking
+    // Use requestAnimationFrame for smooth bar
+    const startTime = performance.now();
+    const duration = 10000;
+
+    function tick(now) {
+        const elapsed = now - startTime;
+        const remaining = Math.max(0, duration - elapsed);
+        const pct = (remaining / duration) * 100;
+        const fillEl = document.getElementById('grace-timer-fill');
+        if (fillEl) fillEl.style.width = pct + '%';
+        const cdEl = document.getElementById('grace-countdown');
+        if (cdEl) cdEl.innerText = Math.ceil(remaining / 1000);
+
+        if (remaining > 0 && document.getElementById('graceScreen') && !document.getElementById('graceScreen').classList.contains('hidden')) {
+            _graceTimer = requestAnimationFrame(tick);
+        } else if (remaining <= 0) {
+            endGracePeriod();
+        }
+    }
+    _graceTimer = requestAnimationFrame(tick);
+}
+
+function endGracePeriod() {
+    if (_graceTimer) { cancelAnimationFrame(_graceTimer); _graceTimer = null; }
+    document.getElementById('graceScreen').classList.add('hidden');
+    closeInventoryModal();
+
+    if (!_graceScene) return;
+    const scene = _graceScene;
+    _graceScene = null;
+
+    // Show evolve/power-up screen
+    scene.showEvolveScreen();
+}

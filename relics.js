@@ -1,14 +1,13 @@
 // Relic System Configuration
 const relicConfigs = {
-    // Different relic types with their properties
     FIRE_RELIC: {
         id: 'fireRelic',
         name: 'FIRE RELIC',
         color: 0xff6600,
-        glowColor: '#ff6600',
-        description: 'Slash range increases by 10%',
+        description: 'Slash range increases by 8% (Diminishing)',
         effect: (player, weapon) => {
-            weapon.range *= 1.1;
+            // Use a multiplier that feels good but doesn't go infinite
+            weapon.range *= 1.08; 
         },
         icon: '🔥'
     },
@@ -17,10 +16,11 @@ const relicConfigs = {
         id: 'shieldRelic',
         name: 'SHIELD RELIC',
         color: 0x0099ff,
-        glowColor: '#0099ff',
-        description: 'Grants 2 protective hits',
+        description: 'Grants 1 protective charge (Max 3)',
         effect: (player) => {
-            player.shieldCharges = (player.shieldCharges || 0) + 2;
+            // Cap the shields so the player isn't immortal
+            const MAX_SHIELDS = 3;
+            player.shieldCharges = Math.min((player.shieldCharges || 0) + 1, MAX_SHIELDS);
         },
         icon: '🛡️'
     },
@@ -29,10 +29,13 @@ const relicConfigs = {
         id: 'speedRelic',
         name: 'SPEED RELIC',
         color: 0x00ff99,
-        glowColor: '#00ff99',
-        description: 'Attack reload reduced by 25%',
+        description: 'Attack speed increased by 10%',
         effect: (player) => {
-            player.reloadModifier *= 0.95;
+            // CAP: Prevent reload from hitting 0 (which breaks the game)
+            const MIN_RELOAD = 0.2; // 20% of original speed
+            if (player.reloadModifier > MIN_RELOAD) {
+                player.reloadModifier *= 0.90;
+            }
         },
         icon: '⚡'
     },
@@ -41,56 +44,47 @@ const relicConfigs = {
         id: 'lifeRelic',
         name: 'LIFE RELIC',
         color: 0xff00ff,
-        glowColor: '#ff00ff',
-        description: 'Maximum HP increased by 2',
+        description: 'Max HP +1 & Full Heal',
         effect: (player) => {
-            player.maxHp += 2;
+            player.maxHp += 1; // +2 was too much for a common drop
             player.hp = player.maxHp;
         },
         icon: '❤️'
     },
     
     REGENERATION_RELIC: {
-    id: 'regenRelic',
-    name: 'REGENERATION RELIC',
-    color: 0x99ff00,
-    glowColor: '#99ff00',
-    description: 'Slowly restores 1 HP every 5 seconds (up to 50% HP)',
-    effect: (player, weapon, scene) => {
-        if (!player.regenActive) {
-            player.regenActive = true;
-            scene.time.addEvent({
-                delay: 5000,
-                callback: () => {
-                    // Calculate the 50% threshold
-                    const halfHealth = player.maxHp * 0.5;
-
-                    // Only heal if player is alive and below the 50% threshold
-                    if (player.hp > 0 && player.hp < halfHealth) {
-                        player.hp++;
-                        
-                        // Ensure we don't accidentally overshoot 50% if healing increments change
-                        if (player.hp > halfHealth) player.hp = halfHealth;
-
-                        const healthPct = (player.hp / player.maxHp) * 100;
-                        document.getElementById('health-fill').style.width = healthPct + "%";
-                    }
-                },
-                loop: true
-            });
-        }
+        id: 'regenRelic',
+        name: 'REGEN RELIC',
+        color: 0x99ff00,
+        description: 'Restores 1 HP every 8s (Up to 40% HP)',
+        effect: (player, weapon, scene) => {
+            // Instead of stacking logic, we just ensure it's running
+            if (!player.regenActive) {
+                player.regenActive = true;
+                scene.time.addEvent({
+                    delay: 8000, // Slower regen creates more tension
+                    callback: () => {
+                        const cap = player.maxHp * 0.4; 
+                        if (player.hp > 0 && player.hp < cap) {
+                            player.hp++;
+                            // Trigger your UI update logic here
+                        }
+                    },
+                    loop: true
+                });
+            }
+        },
+        icon: '🌿'
     },
-    icon: '🌿'
-},
     
     DAMAGE_RELIC: {
         id: 'damageRelic',
         name: 'DAMAGE RELIC',
         color: 0xff0099,
-        glowColor: '#ff0099',
-        description: 'Slash width increased by 50%',
+        description: 'Slash width +15%',
         effect: (player, weapon) => {
-            weapon.width *= 1.5;
+            // 50% was too big; 15% allows for growth without breaking hitboxes
+            weapon.width *= 1.15;
         },
         icon: '⚔️'
     }
@@ -109,3 +103,5 @@ function getRandomRelicForWave(waveIndex) {
 function shouldDropRelic() {
     return Math.random() < RELIC_DROP_CHANCE;
 }
+// Default luck is 1.0. Some items could increase this to 1.2, 1.5, etc.
+const RELIC_DROP_CHANCE = 0.01 * (player.luck || 1.0);

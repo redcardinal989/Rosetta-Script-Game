@@ -6,11 +6,9 @@
     <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser-arcade-physics.min.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=VT323&display=swap');
-
         body { margin: 0; background: #050505; color: #fff; font-family: 'VT323', monospace; overflow: hidden; }
         #game-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
 
-        /* UI Overlays */
         .overlay {
             position: absolute; width: 100%; height: 100%;
             display: flex; flex-direction: column;
@@ -27,14 +25,11 @@
         button:hover { background: #fff; color: #000; box-shadow: 0 0 20px #fff; }
         .hidden { display: none !important; }
 
-        /* HUD */
         #hud {
             position: absolute; top: 20px; left: 20px; z-index: 50;
             pointer-events: none; width: 100%;
         }
         .stats-text { font-size: 24px; color: #ff0033; }
-        #health-container { width: 200px; height: 10px; background: #333; margin-top: 5px; border: 1px solid #fff; }
-        #health-fill { width: 100%; height: 100%; background: #00ff00; transition: width 0.2s; }
         #boss-health-container { width: 320px; height: 14px; background: #330000; margin-top: 10px; border: 1px solid #ff0000; }
         #boss-health-fill { width: 100%; height: 100%; background: #ff3333; transition: width 0.2s; }
         .boss-health-label { margin-top: 8px; color: #ff9999; }
@@ -43,6 +38,7 @@
 <body>
     <div id="game-container"></div>
 
+    <!-- HUD -->
     <div id="hud" class="hidden">
         <div class="stats-text">KILLS: <span id="killCount">0</span></div>
         <div class="stats-text boss-health-label hidden" id="bossHealthLabel">BOSS HEALTH:</div>
@@ -50,13 +46,19 @@
         <div class="stats-text">WAVE: <span id="waveNumber">WAVE 1</span></div>
         <div class="stats-text"><span id="waveProgress">0 / 6</span></div>
         <div class="stats-text" id="waveHint">A fast, hungry swarm of corrupted packets.</div>
-        <div id="health-container"><div id="health-fill"></div></div>
-        <div id="relics-display" class="relics-display">
-            <div class="relics-label">RELICS:</div>
-            <div id="relics-container" class="relics-container"></div>
+
+        <!-- Heart Health Bar -->
+        <div id="hearts-container"></div>
+
+        <!-- Relic HUD: just a small button, inventory opens modal -->
+        <div id="relics-hud" style="pointer-events: all; margin-top: 10px;">
+            <button id="inventory-btn" onclick="openRelicInventory()" title="View your relics">
+                🎒 RELICS <span id="relic-count">0</span>
+            </button>
         </div>
     </div>
 
+    <!-- Relic Pickup Modal (pauses game) -->
     <div id="relic-modal" class="relic-modal hidden">
         <div class="relic-modal-content">
             <div id="modal-icon" class="modal-icon"></div>
@@ -66,11 +68,32 @@
         </div>
     </div>
 
-    <div id="startScreen" class="overlay">
-        <h1>Rosetta Script</h1>
-        <button onclick="startGame()">START</button>
+    <!-- Relic Inventory Modal (doesn't pause game) -->
+    <div id="inventory-modal" class="relic-modal hidden" onclick="closeInventoryOnBackdrop(event)">
+        <div class="relic-modal-content inventory-content">
+            <h2 id="inventory-title" style="color:#00ff99; text-shadow:0 0 10px #00ff99; margin:0 0 5px 0;">🎒 RELIC INVENTORY</h2>
+            <p style="font-size:14px; color:#aaa; margin:0 0 20px 0;">Hover a relic to see its effect</p>
+            <div id="inventory-grid" class="inventory-grid"></div>
+            <button onclick="closeInventoryModal()" style="margin-top:20px; border-color:#00ff99; color:#00ff99;">CLOSE</button>
+        </div>
     </div>
 
+    <!-- Between-Wave Grace Period Screen -->
+    <div id="graceScreen" class="overlay hidden">
+        <div class="grace-content">
+            <div id="grace-wave-title" style="font-size:48px; color:#00ff99; text-shadow:0 0 15px #00ff99; margin-bottom:5px;">WAVE COMPLETE</div>
+            <div id="grace-next-wave" style="font-size:28px; color:#ffffff; margin-bottom:25px;"></div>
+            <div id="grace-stats" class="grace-stats"></div>
+            <div class="grace-timer-bar-wrap">
+                <div class="grace-timer-label">AUTO-STARTING IN <span id="grace-countdown">10</span>s</div>
+                <div class="grace-timer-bar-bg"><div id="grace-timer-fill" class="grace-timer-fill"></div></div>
+            </div>
+            <button id="grace-start-btn" onclick="endGracePeriod()">▶ START NEXT WAVE</button>
+            <button onclick="openRelicInventory()" style="border-color:#00ff99; color:#00ff99; font-size:20px; padding:8px 24px; margin-top:0;">🎒 VIEW RELICS</button>
+        </div>
+    </div>
+
+    <!-- Evolve / Power-Up Screen -->
     <div id="levelUpScreen" class="overlay hidden">
         <h1 id="levelUpTitle" style="color:#00ff00; text-shadow: 0 0 10px #00ff00;">EVOLVE</h1>
         <p id="evolveDescription" style="margin: 0 0 20px; font-size: 24px; max-width: 700px; text-align: center; line-height: 1.3;"></p>
@@ -79,6 +102,12 @@
             <button id="powerBtn2" onclick="applyPowerUp(this.dataset.power)">ADRENALINE (-2% CD)</button>
             <button id="powerBtn3" onclick="applyPowerUp(this.dataset.power)">SHOCKWAVE (+range)</button>
         </div>
+    </div>
+
+    <!-- Start Screen -->
+    <div id="startScreen" class="overlay">
+        <h1>Rosetta Script</h1>
+        <button onclick="startGame()">START</button>
     </div>
 
     <script src="relics.js"></script>

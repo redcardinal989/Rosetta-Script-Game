@@ -5,9 +5,9 @@ let pausedScene = null; // Track paused scene for relic modal
 const waveTemplateBase = [
     {
         title: 'DATA SWARM',
-        targetKills: 6,
+        targetKills: 18,
         enemySpeed: 120,
-        spawnThreshold: 97,
+        spawnThreshold: 94,
         enemyColor: 0xff0033,
         description: 'A fast, hungry swarm of corrupted packets.',
         powerOptions: [
@@ -18,9 +18,9 @@ const waveTemplateBase = [
     },
     {
         title: 'FIREWALL RUSH',
-        targetKills: 8,
+        targetKills: 24,
         enemySpeed: 160,
-        spawnThreshold: 95,
+        spawnThreshold: 92,
         enemyColor: 0xff9933,
         description: 'Stronger defenders close in with greater fury.',
         powerOptions: [
@@ -31,9 +31,9 @@ const waveTemplateBase = [
     },
     {
         title: 'VIRUS HIVE',
-        targetKills: 10,
+        targetKills: 30,
         enemySpeed: 180,
-        spawnThreshold: 94,
+        spawnThreshold: 91,
         enemyColor: 0x33ccff,
         description: 'The hive mutates. Evade and strike precisely.',
         powerOptions: [
@@ -44,9 +44,9 @@ const waveTemplateBase = [
     },
     {
         title: 'SYSTEM CORE',
-        targetKills: 12,
+        targetKills: 36,
         enemySpeed: 210,
-        spawnThreshold: 93,
+        spawnThreshold: 90,
         enemyColor: 0xff00ff,
         description: 'Final core defenders spawn relentlessly.',
         powerOptions: [
@@ -74,7 +74,7 @@ function createWaveConfig(index) {
 
     return {
         title: `WAVE ${index + 1}: ${template.title}`,
-        targetKills: template.targetKills + phase * 2 + (index % 3),
+        targetKills: template.targetKills + phase * 6 + (index % 3) * 2,
         enemySpeed: Math.round(template.enemySpeed * speedMultiplier),
         spawnThreshold,
         enemyColor: template.enemyColor,
@@ -163,11 +163,32 @@ class GameScene extends Phaser.Scene {
         // Initialize heart display
         setTimeout(() => updateHeartsDisplay(this.player.hp, this.player.maxHp), 100);
 
+        // Player indicator — subtle pulsing ring so the player never loses themselves
+        this._playerRing = this.add.circle(width / 2, height / 2, 18, 0x00ff00, 0);
+        this._playerRing.setStrokeStyle(1, 0x00ff88, 0.45);
+        this._playerRing.setDepth(1);
+        this.tweens.add({
+            targets: this._playerRing,
+            scaleX: 1.35, scaleY: 1.35,
+            alpha: { from: 0.55, to: 0.12 },
+            duration: 900,
+            yoyo: true,
+            loop: -1,
+            ease: 'Sine.easeInOut'
+        });
+
         // 2. Enemy Group
         this.enemies = this.physics.add.group();
 
         // 3. Relics Group
         this.relics = this.physics.add.group();
+
+        // Splitter projectiles group (minor enemy projectiles)
+        this.splitterProjectiles = this.physics.add.group();
+        this.physics.add.overlap(this.player, this.splitterProjectiles, (p, bullet) => {
+            bullet.destroy();
+            this.takeDamage();
+        });
 
         // 4. Inputs
         this.cursors = this.input.keyboard.createCursorKeys();
@@ -186,7 +207,7 @@ class GameScene extends Phaser.Scene {
         this.bossProjectiles = this.physics.add.group();
         this.physics.add.overlap(this.player, this.bossProjectiles, (p, bullet) => {
             bullet.destroy();
-            this.takeDamage();
+            this.takeDamage(2); // Boss hits hard — 2 hearts
         });
 
         // 6. Wave System
@@ -200,15 +221,12 @@ class GameScene extends Phaser.Scene {
 
         // 8. Collision: Enemy hits Player
         this.physics.add.overlap(this.player, this.enemies, (p, enemy) => {
-            // Apply DoT if player owns a Voltfire Matrix
-            if (this.player.hasDot && !this._dotEnemies.has(enemy)) {
-                this.applyDotToEnemy(enemy);
-            }
             // Only play hit sound + deal damage when NOT already invulnerable
             if (!this.player.invulnerable) {
                 try { this.sound.play('hit', { volume: 0.7 }); } catch(e) {}
             }
-            this.takeDamage();
+            // Brutes hit for 2 hearts on contact
+            this.takeDamage(enemy._isBrute ? 2 : 1);
         });     
 
         // 9. Collision: Relic hits Player
@@ -225,15 +243,23 @@ class GameScene extends Phaser.Scene {
         const speed = 200 * (this.player.moveSpeedMultiplier || 1);
         this.player.body.setVelocity(0);
 
-        if (this.keys.A.isDown || this.cursors.left.isDown) this.player.body.setVelocityX(-speed);
-        if (this.keys.D.isDown || this.cursors.right.isDown) this.player.body.setVelocityX(speed);
-        if (this.keys.W.isDown || this.cursors.up.isDown) this.player.body.setVelocityY(-speed);
-        if (this.keys.S.isDown || this.cursors.down.isDown) this.player.body.setVelocityY(speed);
+        if (!this.player._frozen) {
+            if (this.keys.A.isDown || this.cursors.left.isDown) this.player.body.setVelocityX(-speed);
+            if (this.keys.D.isDown || this.cursors.right.isDown) this.player.body.setVelocityX(speed);
+            if (this.keys.W.isDown || this.cursors.up.isDown) this.player.body.setVelocityY(-speed);
+            if (this.keys.S.isDown || this.cursors.down.isDown) this.player.body.setVelocityY(speed);
+        }
 
         // Keep aegis ring centered on player
         if (this._aegisRing && this._aegisRing.active) {
             this._aegisRing.x = this.player.x;
             this._aegisRing.y = this.player.y;
+        }
+
+        // Keep player indicator ring centered
+        if (this._playerRing && this._playerRing.active) {
+            this._playerRing.x = this.player.x;
+            this._playerRing.y = this.player.y;
         }
 
         // Enemy Spawning (Random chance per frame)
@@ -243,12 +269,35 @@ class GameScene extends Phaser.Scene {
 
         // Enemy AI: Follow Player (respect temporary modifier; skip frozen enemies)
         this.enemies.getChildren().forEach(enemy => {
+            // Track brute HP label position
+            if (enemy._isBrute && enemy._hpLabel && enemy._hpLabel.active) {
+                enemy._hpLabel.x = enemy.x;
+                enemy._hpLabel.y = enemy.y - 34;
+            }
             if (enemy._frozen) {
                 if (enemy.body) enemy.body.setVelocity(0);
+                // Cryo Burst: shatter check while frozen
+                if (enemy._cryoBurst && !enemy._shatterChecked) {
+                    enemy._shatterChecked = true;
+                    if (Math.random() < 0.55) {
+                        this.time.delayedCall(Phaser.Math.Between(300, 900), () => {
+                            if (enemy && enemy.active && enemy._frozen) {
+                                this.cryoBurstShatter(enemy);
+                            }
+                        });
+                    }
+                }
                 return;
             }
+            // Reset shatter check when thawed so it can trigger next freeze
+            if (enemy._cryoBurst) enemy._shatterChecked = false;
+
             const speed = this.currentWave.enemySpeed * (this.enemySpeedModifier || 1);
-            this.physics.moveToObject(enemy, this.player, speed);
+            // Cryo burst enemies move slightly faster; Brutes are very slow
+            let spd = speed;
+            if (enemy._cryoBurst) spd = speed * 1.2;
+            if (enemy._isBrute)   spd = Math.min(speed * 0.32, 68); // capped slow
+            this.physics.moveToObject(enemy, this.player, spd);
         });
     }
 
@@ -324,8 +373,19 @@ class GameScene extends Phaser.Scene {
                 enemy.hp = (enemy.hp || 1) - dmg;
 
                 // Cryo Shard: freeze the enemy on slash hit
-                if (this.player.hasCryo && !enemy._frozen) {
+                if (this.player.hasCryo && !enemy._frozen && !enemy._immuneToFreeze) {
                     this.applyCryoToEnemy(enemy);
+                }
+
+                // Cryo Burst: if already frozen when slashed, shatter immediately
+                if (enemy._cryoBurst && enemy._frozen) {
+                    this.cryoBurstShatter(enemy);
+                    return;
+                }
+
+                // Voltfire Matrix DoT: apply burn on slash hit (not on contact)
+                if (this.player.hasDot && !this._dotEnemies.has(enemy)) {
+                    this.applyDotToEnemy(enemy);
                 }
 
                 // Flash white on hit
@@ -333,12 +393,32 @@ class GameScene extends Phaser.Scene {
                     const prevFill = enemy.fillColor;
                     enemy.setFillStyle(0xffffff);
                     this.time.delayedCall(80, () => { if (enemy.active) enemy.setFillStyle(prevFill); });
+                    // Update brute HP label
+                    if (enemy._isBrute && enemy._hpLabel && enemy._hpLabel.active) {
+                        enemy._hpLabel.setText(`HP: ${Math.max(0, Math.ceil(enemy.hp))}`);
+                        enemy._hpLabel.x = enemy.x;
+                        enemy._hpLabel.y = enemy.y - 34;
+                    }
                     return; // still alive
                 }
 
                 // Enemy dies
                 if (shouldDropRelic()) {
                     this.spawnRelic(enemy.x, enemy.y);
+                }
+
+                // Brute death: clean up label and slam timer
+                if (enemy._isBrute) {
+                    if (enemy._slamTimer) enemy._slamTimer.remove(false);
+                    if (enemy._hpLabel && enemy._hpLabel.active) enemy._hpLabel.destroy();
+                    // Death shockwave
+                    this._bruteDeathExplosion(enemy.x, enemy.y);
+                }
+
+                // Splitter: clean up shot timer and spawn 2 fragments
+                if (enemy._isSplitter) {
+                    if (enemy._shotTimer) enemy._shotTimer.remove(false);
+                    this._spawnSplitterFragments(enemy.x, enemy.y);
                 }
 
                 enemy.destroy();
@@ -371,6 +451,21 @@ class GameScene extends Phaser.Scene {
             }
         }
 
+        // Phase 2: slash hits minibosses
+        if (this._bossPhase2Active && this._phase2Bosses) {
+            this._phase2Bosses.forEach(mb => {
+                if (!mb || !mb.active) return;
+                const dist = Phaser.Math.Distance.Between(this.player.x, this.player.y, mb.x, mb.y);
+                const ang2 = Phaser.Math.Angle.Between(this.player.x, this.player.y, mb.x, mb.y);
+                const diff = Math.abs(Phaser.Math.Angle.Wrap(angle - ang2));
+                if (dist < this.currentWeapon.range && diff < this.currentWeapon.width / 2) {
+                    let dmg = 6 + (this.player.bonusDamage || 0);
+                    if (this._oneShotWavesLeft > 0) dmg = 99999;
+                    this._damageMiniBoss(mb, dmg);
+                }
+            });
+        }
+
         // Fade Slash — quick fade so stacked arcs don't linger
         this.tweens.add({ targets: arc, alpha: 0, duration: 120, onComplete: () => arc.destroy() });
 
@@ -381,6 +476,11 @@ class GameScene extends Phaser.Scene {
     }
 
     spawnEnemy() {
+        // After wave 2: 28% chance to spawn a Cryo Burst enemy instead of a normal one
+        if (this.waveIndex >= 2 && Math.random() < 0.28) {
+            return this.spawnCryoBurstEnemy();
+        }
+
         const spawnAngle = Math.random() * Math.PI * 2;
         const x = this.player.x + Math.cos(spawnAngle) * 400;
         const y = this.player.y + Math.sin(spawnAngle) * 400;
@@ -406,6 +506,9 @@ class GameScene extends Phaser.Scene {
     }
 
     spawnRelic(x, y) {
+        // Cap: max 5 relics on the ground at once — keeps the arena readable
+        if (this.relics.getChildren().length >= 5) return;
+
         // Get random relic for current wave
         const relic = getRandomRelicForWave(this.waveIndex);
         
@@ -436,6 +539,346 @@ class GameScene extends Phaser.Scene {
         });
     }
 
+    // ── SPLITTER ENEMY ──────────────────────────────────────────
+    // Weaker echo of the boss split — 2 HP, fires 2 slow aimed shots,
+    // fractures into 2 tiny fragment enemies on death.
+    // Spawns in groups of 2-3 every 6 waves.
+    spawnSplitterEnemy() {
+        const { width, height } = this.scale;
+        const edge = Phaser.Math.Between(0, 3);
+        let x, y;
+        if (edge === 0)      { x = Phaser.Math.Between(40, width - 40); y = 40; }
+        else if (edge === 1) { x = Phaser.Math.Between(40, width - 40); y = height - 40; }
+        else if (edge === 2) { x = 40; y = Phaser.Math.Between(40, height - 40); }
+        else                 { x = width - 40; y = Phaser.Math.Between(40, height - 40); }
+
+        const splitter = this.add.circle(x, y, 17, 0xffcc00);
+        splitter.setStrokeStyle(3, 0xffffff);
+        splitter.setDepth(2);
+        this.enemies.add(splitter);
+        this.physics.add.existing(splitter);
+        splitter.body.setCollideWorldBounds(true);
+        // HP scales with wave tier but always at least 5 — noticeably tankier than normals
+        const splitterTier = Math.floor(this.waveIndex / 5);
+        splitter.hp = 5 + splitterTier * 2;
+        splitter.maxHp = splitter.hp;
+        splitter._isSplitter = true;
+        splitter._origColor = 0xffcc00;
+
+        // Pulsing glow to distinguish from normal enemies
+        this.tweens.add({
+            targets: splitter, scaleX: 1.18, scaleY: 1.18,
+            duration: 450, yoyo: true, loop: -1, ease: 'Sine.easeInOut'
+        });
+
+        // Fire 3 spread shots every 1.4–2s
+        const shotTimer = this.time.addEvent({
+            delay: 1400 + Phaser.Math.Between(0, 600),
+            loop: true,
+            callback: () => {
+                if (!splitter || !splitter.active) { shotTimer.remove(false); return; }
+                this._splitterFireShot(splitter, 0);
+                this.time.delayedCall(180, () => {
+                    if (splitter && splitter.active) this._splitterFireShot(splitter, 0.22);
+                });
+                this.time.delayedCall(360, () => {
+                    if (splitter && splitter.active) this._splitterFireShot(splitter, -0.22);
+                });
+            }
+        });
+        splitter._shotTimer = shotTimer;
+
+        return splitter;
+    }
+
+    _splitterFireShot(splitter, angleOffset) {
+        const baseAngle = Phaser.Math.Angle.Between(splitter.x, splitter.y, this.player.x, this.player.y);
+        const a = baseAngle + angleOffset;
+        const proj = this.add.circle(splitter.x, splitter.y, 5, 0xffee00);
+        proj.setStrokeStyle(1, 0xffffff);
+        this.splitterProjectiles.add(proj);
+        this.physics.add.existing(proj);
+        proj.body.setAllowGravity(false);
+        proj.body.setCollideWorldBounds(true);
+        const spd = 185 + Phaser.Math.Between(0, 40); // deliberately slow
+        proj.body.setVelocity(Math.cos(a) * spd, Math.sin(a) * spd);
+        this.time.delayedCall(5000, () => { if (proj && proj.active) proj.destroy(); });
+    }
+
+    _spawnSplitterFragments(x, y) {
+        for (let i = 0; i < 2; i++) {
+            const ang = (Math.PI * 2 / 2) * i + Math.random() * 0.6;
+            const fx = x + Math.cos(ang) * 20;
+            const fy = y + Math.sin(ang) * 20;
+            const frag = this.add.circle(fx, fy, 6, 0xffaa00);
+            frag.setStrokeStyle(1, 0xffffff);
+            frag.setDepth(2);
+            this.enemies.add(frag);
+            this.physics.add.existing(frag);
+            frag.body.setCollideWorldBounds(true);
+            frag.hp = 2;
+            frag.maxHp = 2;
+            frag._isSplitterFrag = true;
+            const spd = 160;
+            frag.body.setVelocity(Math.cos(ang) * spd, Math.sin(ang) * spd);
+            this.time.delayedCall(320, () => {
+                if (frag && frag.active) frag.body.setVelocity(0, 0);
+            });
+        }
+    }
+
+    // ── CRYO BURST ENEMY ────────────────────────────────────────
+    // Crystalline enemy. When frozen by Cryo Shard (55% chance),
+    // it SHATTERS — AoE ice shards hit nearby enemies and may freeze the player.
+    _bruteDeathExplosion(x, y) {
+        const colors = [0xff4400, 0xff8800, 0xffffff, 0xcc2200];
+        for (let i = 0; i < 16; i++) {
+            const ang = (Math.PI * 2 / 16) * i;
+            const spark = this.add.circle(x, y, 5, colors[i % colors.length]);
+            spark.setDepth(6);
+            this.tweens.add({
+                targets: spark,
+                x: x + Math.cos(ang) * 60, y: y + Math.sin(ang) * 60,
+                alpha: 0, scaleX: 0.2, scaleY: 0.2,
+                duration: 550, ease: 'Power2',
+                onComplete: () => spark.destroy()
+            });
+        }
+        this.cameras.main.shake(300, 0.018);
+    }
+
+    spawnCryoBurstEnemy() {
+        const spawnAngle = Math.random() * Math.PI * 2;
+        const x = this.player.x + Math.cos(spawnAngle) * 420;
+        const y = this.player.y + Math.sin(spawnAngle) * 420;
+
+        const cryo = this.add.circle(x, y, 10, 0x88eeff);
+        cryo.setStrokeStyle(2, 0xffffff);
+        cryo.setDepth(2);
+        this.enemies.add(cryo);
+        this.physics.add.existing(cryo);
+        cryo.body.setCollideWorldBounds(true);
+        const hpTier = Math.floor(this.waveIndex / 5);
+        cryo.hp = 1 + hpTier;
+        cryo.maxHp = cryo.hp;
+        cryo._cryoBurst = true;
+        cryo._shatterChecked = false;
+        cryo._origColor = 0x88eeff;
+
+        // Crystalline spin animation
+        this.tweens.add({
+            targets: cryo, angle: 360,
+            duration: 1800, loop: -1, ease: 'Linear'
+        });
+
+        return cryo;
+    }
+
+    // Called when a cryo-burst enemy shatters while frozen
+    cryoBurstShatter(enemy) {
+        if (!enemy || !enemy.active) return;
+        const x = enemy.x, y = enemy.y;
+
+        // Kill the enemy (counts as a kill)
+        if (shouldDropRelic()) this.spawnRelic(x, y);
+        if (enemy._shotTimer) enemy._shotTimer.remove(false);
+        enemy.destroy();
+        score++;
+        this.waveKills++;
+        document.getElementById('killCount').innerText = score;
+        document.getElementById('waveProgress').innerText = `${this.waveKills} / ${this.currentWave.targetKills}`;
+        if (this.waveKills >= this.currentWave.targetKills) { this.advanceWave(); return; }
+
+        // ── Shatter burst visual ─────────────────────────────────
+        const SHARD_RADIUS = 130;
+        const shardCount = 8;
+        for (let i = 0; i < shardCount; i++) {
+            const ang = (Math.PI * 2 / shardCount) * i;
+            const shard = this.add.circle(x, y, 4, 0xaaeeff, 1);
+            shard.setDepth(6);
+            this.tweens.add({
+                targets: shard,
+                x: x + Math.cos(ang) * SHARD_RADIUS,
+                y: y + Math.sin(ang) * SHARD_RADIUS,
+                alpha: 0, scaleX: 0.3, scaleY: 0.3,
+                duration: 420, ease: 'Power2',
+                onComplete: () => shard.destroy()
+            });
+        }
+        // Expanding ring
+        const ring = this.add.circle(x, y, 10, 0x88eeff, 0);
+        ring.setStrokeStyle(2, 0xaaeeff);
+        ring.setDepth(5);
+        this.tweens.add({
+            targets: ring, scaleX: SHARD_RADIUS / 10, scaleY: SHARD_RADIUS / 10,
+            alpha: 0, duration: 380, ease: 'Power1',
+            onComplete: () => ring.destroy()
+        });
+
+        // ── AoE: damage + freeze nearby enemies ──────────────────
+        this.enemies.getChildren().forEach(other => {
+            if (!other || !other.active) return;
+            const dist = Phaser.Math.Distance.Between(x, y, other.x, other.y);
+            if (dist < SHARD_RADIUS) {
+                other.hp -= 2;
+                if (!other._frozen) this.applyCryoToEnemy(other);
+                if (other.hp <= 0) {
+                    if (shouldDropRelic()) this.spawnRelic(other.x, other.y);
+                    if (other._shotTimer) other._shotTimer.remove(false);
+                    other.destroy();
+                    score++;
+                    this.waveKills++;
+                    document.getElementById('killCount').innerText = score;
+                    document.getElementById('waveProgress').innerText = `${this.waveKills} / ${this.currentWave.targetKills}`;
+                    if (this.waveKills >= this.currentWave.targetKills) { this.advanceWave(); return; }
+                } else {
+                    const prev = other.fillColor;
+                    other.setFillStyle(0xaaeeff);
+                    this.time.delayedCall(100, () => { if (other.active) other.setFillStyle(prev); });
+                }
+            }
+        });
+
+        // ── 35% chance to FREEZE the player if close enough ──────
+        const playerDist = Phaser.Math.Distance.Between(x, y, this.player.x, this.player.y);
+        if (playerDist < SHARD_RADIUS && Math.random() < 0.35) {
+            this._freezePlayer();
+        }
+    }
+
+    // Briefly stuns/freezes the player (can't move for 1.2s)
+    _freezePlayer() {
+        if (this.player._frozen || this.player.invulnerable) return;
+        this.player._frozen = true;
+
+        const prevColor = 0x00ff00;
+        this.player.setFillStyle(0x88eeff);
+
+        const { width, height } = this.scale;
+        const txt = this.add.text(this.player.x, this.player.y - 28, '❄ FROZEN!',
+            { fontFamily: 'VT323', fontSize: '20px', color: '#88eeff',
+              stroke: '#000', strokeThickness: 3 });
+        txt.setOrigin(0.5).setDepth(10);
+        this.tweens.add({ targets: txt, alpha: 0, y: txt.y - 22,
+            duration: 900, onComplete: () => txt.destroy() });
+
+        this.time.delayedCall(1200, () => {
+            if (this.player) {
+                this.player._frozen = false;
+                this.player.setFillStyle(prevColor);
+            }
+        });
+    }
+
+    // ── BRUTE ENEMY ──────────────────────────────────────────────
+    // Massive, very slow juggernaut. Spawns after wave 10.
+    // High HP, hits for 2 hearts on contact. Cannot be frozen.
+    // Telegraphs a ground slam — screen shake + shockwave ring warning.
+    spawnBruteEnemy() {
+        const { width, height } = this.scale;
+        const edge = Phaser.Math.Between(0, 3);
+        let x, y;
+        if (edge === 0)      { x = Phaser.Math.Between(60, width - 60); y = 60; }
+        else if (edge === 1) { x = Phaser.Math.Between(60, width - 60); y = height - 60; }
+        else if (edge === 2) { x = 60; y = Phaser.Math.Between(60, height - 60); }
+        else                 { x = width - 60; y = Phaser.Math.Between(60, height - 60); }
+
+        const brute = this.add.circle(x, y, 24, 0xcc2200);
+        brute.setStrokeStyle(4, 0xff6600);
+        brute.setDepth(3);
+        this.enemies.add(brute);
+        this.physics.add.existing(brute);
+        brute.body.setCollideWorldBounds(true);
+
+        // HP: substantial — scales up with wave
+        const bruteTier = Math.floor((this.waveIndex - 10) / 5);
+        brute.hp = 12 + bruteTier * 4;
+        brute.maxHp = brute.hp;
+        brute._isBrute = true;
+        brute._origColor = 0xcc2200;
+        // Brutes are immune to freeze
+        brute._immuneToFreeze = true;
+
+        // Slow, ominous pulsing — grows slightly as it approaches
+        this.tweens.add({
+            targets: brute, scaleX: 1.08, scaleY: 1.08,
+            duration: 700, yoyo: true, loop: -1, ease: 'Sine.easeInOut'
+        });
+
+        // Ground slam: every 4s, telegraph then shockwave outward
+        const slamTimer = this.time.addEvent({
+            delay: 4000 + Phaser.Math.Between(0, 1000),
+            loop: true,
+            callback: () => {
+                if (!brute || !brute.active) { slamTimer.remove(false); return; }
+                this._bruteGroundSlam(brute);
+            }
+        });
+        brute._slamTimer = slamTimer;
+
+        // Floating HP label above brute
+        const hpLabel = this.add.text(brute.x, brute.y - 34, `HP: ${brute.hp}`,
+            { fontFamily: 'VT323', fontSize: '16px', color: '#ff8888', stroke: '#000', strokeThickness: 3 });
+        hpLabel.setOrigin(0.5).setDepth(8);
+        brute._hpLabel = hpLabel;
+
+        return brute;
+    }
+
+    _bruteGroundSlam(brute) {
+        // 1. Telegraph: orange expanding warning ring
+        const warnRing = this.add.circle(brute.x, brute.y, 12, 0xff6600, 0);
+        warnRing.setStrokeStyle(3, 0xff6600);
+        warnRing.setDepth(4);
+        this.tweens.add({
+            targets: warnRing, scaleX: 12, scaleY: 12, alpha: 0,
+            duration: 600, ease: 'Power1',
+            onComplete: () => warnRing.destroy()
+        });
+
+        // 2. After short delay: actual shockwave — damages player if close
+        this.time.delayedCall(650, () => {
+            if (!brute || !brute.active) return;
+            const SLAM_RADIUS = 100;
+
+            const slamRing = this.add.circle(brute.x, brute.y, 10, 0xff4400, 0);
+            slamRing.setStrokeStyle(4, 0xff4400);
+            slamRing.setDepth(5);
+            this.tweens.add({
+                targets: slamRing, scaleX: SLAM_RADIUS / 10, scaleY: SLAM_RADIUS / 10, alpha: 0,
+                duration: 300, ease: 'Power2',
+                onComplete: () => slamRing.destroy()
+            });
+
+            // Camera shake for weight
+            this.cameras.main.shake(180, 0.012);
+
+            // If player is in range, deal 2 hearts
+            const dist = Phaser.Math.Distance.Between(brute.x, brute.y, this.player.x, this.player.y);
+            if (dist < SLAM_RADIUS + 20) {
+                this.takeDamage(2);
+            }
+        });
+    }
+
+    _showWaveAlert(msg, color) {
+        const col = color || '#ffcc00';
+        const { width, height } = this.scale;
+        const txt = this.add.text(width / 2, height / 2 - 90, msg,
+            { fontFamily: 'VT323', fontSize: '30px', color: col,
+              stroke: '#000000', strokeThickness: 4 });
+        txt.setOrigin(0.5).setDepth(20);
+        txt.setAlpha(0);
+        this.tweens.add({
+            targets: txt, alpha: 1, y: txt.y - 16, duration: 280, ease: 'Back.easeOut',
+            onComplete: () => {
+                this.time.delayedCall(2000, () => {
+                    this.tweens.add({ targets: txt, alpha: 0, duration: 380, onComplete: () => txt.destroy() });
+                });
+            }
+        });
+    }
+
     pickupRelic(relicSprite) {
         const relic = relicSprite.relicData;
 
@@ -454,6 +897,7 @@ class GameScene extends Phaser.Scene {
     resetAfterUpgrade() {
         // Clear existing enemies
         try { this.enemies.clear(true, true); } catch (e) { /* ignore if not present */ }
+        try { if (this.splitterProjectiles) this.splitterProjectiles.clear(true, true); } catch (e) {}
 
         // Reposition player to center
         const cx = this.scale.width / 2;
@@ -471,6 +915,42 @@ class GameScene extends Phaser.Scene {
         // Temporarily slow enemies so they are easier to react to
         this.enemySpeedModifier = 0.65;
         this.time.delayedCall(4000, () => { this.enemySpeedModifier = 1; });
+
+        // Splitter squad: 2-3 spawn at wave edges, each fires 2 slow projectiles
+        if (this._pendingSplitterSpawn) {
+            this._pendingSplitterSpawn = false;
+            const count = Phaser.Math.Between(2, 3);
+            for (let i = 0; i < count; i++) {
+                this.time.delayedCall(600 + i * 500, () => {
+                    this.spawnSplitterEnemy();
+                });
+            }
+            this._showWaveAlert('⚠ SPLITTERS INCOMING', '#ffcc00');
+        }
+
+        // Cryo Burst wave seed
+        if (this._pendingCryoBurstWave) {
+            this._pendingCryoBurstWave = false;
+            const cryoCount = Phaser.Math.Between(3, 4);
+            for (let i = 0; i < cryoCount; i++) {
+                this.time.delayedCall(800 + i * 450, () => {
+                    this.spawnCryoBurstEnemy();
+                });
+            }
+            this._showWaveAlert('❄ CRYO SHARDS DETECTED', '#88eeff');
+        }
+
+        // Brute squad: 1-2 per wave after wave 10 — slow juggernauts, 2-heart contact
+        if (this._pendingBruteSpawn) {
+            this._pendingBruteSpawn = false;
+            const bruteCount = this.waveIndex >= 18 ? 2 : 1;
+            for (let i = 0; i < bruteCount; i++) {
+                this.time.delayedCall(1000 + i * 1200, () => {
+                    this.spawnBruteEnemy();
+                });
+            }
+            this._showWaveAlert('☠ BRUTE INCOMING', '#ff4444');
+        }
     }
 
     updateRelicsDisplay() {
@@ -705,6 +1185,13 @@ class GameScene extends Phaser.Scene {
 
                 if (enemy._dotHp <= 0) {
                     if (shouldDropRelic()) this.spawnRelic(enemy.x, enemy.y);
+                    if (enemy._shotTimer) enemy._shotTimer.remove(false);
+                    if (enemy._isSplitter) this._spawnSplitterFragments(enemy.x, enemy.y);
+                    if (enemy._isBrute) {
+                        if (enemy._slamTimer) enemy._slamTimer.remove(false);
+                        if (enemy._hpLabel && enemy._hpLabel.active) enemy._hpLabel.destroy();
+                        this._bruteDeathExplosion(enemy.x, enemy.y);
+                    }
                     enemy.destroy();
                     score++;
                     this.waveKills++;
@@ -732,20 +1219,285 @@ class GameScene extends Phaser.Scene {
 
         if (this.boss.hp <= 0) {
             this.boss.destroy();
-            this.bossActive = false;
+            this.boss = null;
 
+            // Stop main boss attack timer
             if (this.bossAttackTimer) {
                 this.bossAttackTimer.remove(false);
+                this.bossAttackTimer = null;
             }
 
-            this.bossProjectiles.clear(true, true);
-            if (this.bossWarningBar) {
-                this.bossWarningBar.destroy();
-                this.bossWarningBar = null;
+            // Check if we're already in phase 2 (minibosses alive)
+            if (this._bossPhase2Active) {
+                this._bossPhase2Count = (this._bossPhase2Count || 0) + 1;
+                if (this._bossPhase2Count >= 4) {
+                    // All 4 minibosses dead — victory
+                    this._endBossPhase2();
+                    this.showVictory();
+                }
+                return;
             }
 
-            this.showVictory();
+            // ── PHASE 2: Main boss just died — spawn 4 frenzied minibosses ──
+            this._triggerBossPhase2();
         }
+    }
+
+    _triggerBossPhase2() {
+        this._bossPhase2Active = true;
+        this._bossPhase2Count = 0;
+        this._phase2Bosses = [];
+
+        // Clear stray projectiles
+        this.bossProjectiles.clear(true, true);
+        if (this.bossWarningBar) { this.bossWarningBar.destroy(); this.bossWarningBar = null; }
+
+        // Flash screen red to signal the split
+        const { width, height } = this.scale;
+        const flash = this.add.rectangle(width / 2, height / 2, width, height, 0xff0000, 0);
+        flash.setDepth(20);
+        this.tweens.add({
+            targets: flash, alpha: 0.5, duration: 120, yoyo: true, repeat: 3,
+            onComplete: () => flash.destroy()
+        });
+
+        // Banner text
+        const banner = this.add.text(width / 2, height / 2 - 60,
+            '💀 IT SPLITS! 💀', {
+                fontFamily: 'VT323', fontSize: '52px', color: '#ff4444',
+                stroke: '#000', strokeThickness: 5,
+                shadow: { blur: 20, color: '#ff0000', fill: true }
+            });
+        banner.setOrigin(0.5);
+        banner.setDepth(25);
+        this.tweens.add({
+            targets: banner, alpha: 0, y: banner.y - 50,
+            duration: 300, delay: 1400, onComplete: () => banner.destroy()
+        });
+
+        // Spawn positions: corners of arena
+        const margin = 80;
+        const spawnPoints = [
+            { x: margin,         y: margin },
+            { x: width - margin, y: margin },
+            { x: margin,         y: height - margin },
+            { x: width - margin, y: height - margin }
+        ];
+
+        const miniBossMaxHp = Math.ceil((this.currentWave.bossMaxHp || 70) * 0.25);
+
+        spawnPoints.forEach((pt, i) => {
+            this.time.delayedCall(i * 180, () => {
+                const mb = this._spawnMiniBoss(pt.x, pt.y, miniBossMaxHp);
+                this._phase2Bosses.push(mb);
+            });
+        });
+
+        // Update boss health bar to show combined miniboss pool
+        this._phase2TotalHp = miniBossMaxHp * 4;
+        this._phase2HpRemaining = this._phase2TotalHp;
+    }
+
+    _spawnMiniBoss(x, y, maxHp) {
+        // Unique pulsing color per mini-boss: red, orange, magenta, yellow
+        const colors = [0xff2222, 0xff8800, 0xff00ff, 0xffcc00];
+        const idx = this._phase2Bosses ? this._phase2Bosses.length : 0;
+        const col = colors[idx % colors.length];
+
+        const mb = this.add.circle(x, y, 18, col);
+        mb.setStrokeStyle(3, 0xffffff);
+        mb.setDepth(3);
+        this.physics.add.existing(mb);
+        mb.body.setImmovable(false);
+        mb.body.setAllowGravity(false);
+        mb.body.setCollideWorldBounds(true);
+        mb.body.bounce.set(0.4);
+        mb.maxHp = maxHp;
+        mb.hp = maxHp;
+        mb.isMiniBoss = true;
+        mb._origColor = col;
+
+        // Register in the boss group so slashes can hit it
+        this._registerMiniBossOverlap(mb);
+
+        // Spawn-in scale pop
+        mb.setScale(0.1);
+        this.tweens.add({ targets: mb, scaleX: 1, scaleY: 1, duration: 300, ease: 'Back.easeOut' });
+
+        // ── Attack pattern: SPIRAL BURST ─────────────────────────
+        // Every 1.8s fires a ring of 8 projectiles outward
+        const spiralTimer = this.time.addEvent({
+            delay: 1800 + Phaser.Math.Between(0, 600),
+            loop: true,
+            callback: () => {
+                if (!mb || !mb.active || !this._bossPhase2Active) return;
+                this._spawnSpiralBurst(mb);
+            }
+        });
+        mb._atkTimer1 = spiralTimer;
+
+        // ── Attack pattern: AIMED TRIPLE SHOT ────────────────────
+        // Every 2.5s fires 3 bullets aimed at player spread slightly
+        const tripleTimer = this.time.addEvent({
+            delay: 2500 + Phaser.Math.Between(0, 800),
+            loop: true,
+            callback: () => {
+                if (!mb || !mb.active || !this._bossPhase2Active) return;
+                this._spawnTripleShot(mb);
+            }
+        });
+        mb._atkTimer2 = tripleTimer;
+
+        // ── Movement: erratic dashing ─────────────────────────────
+        const dashTimer = this.time.addEvent({
+            delay: 1200 + Phaser.Math.Between(0, 500),
+            loop: true,
+            callback: () => {
+                if (!mb || !mb.active) return;
+                // 60% chance: dash toward player; 40%: dash random
+                if (Math.random() < 0.6) {
+                    const angle = Phaser.Math.Angle.Between(mb.x, mb.y, this.player.x, this.player.y);
+                    const speed = 320 + Phaser.Math.Between(0, 100);
+                    mb.body.setVelocity(Math.cos(angle) * speed, Math.sin(angle) * speed);
+                    this.time.delayedCall(250, () => {
+                        if (mb && mb.active) mb.body.setVelocity(0, 0);
+                    });
+                } else {
+                    const randAngle = Math.random() * Math.PI * 2;
+                    const speed = 260;
+                    mb.body.setVelocity(Math.cos(randAngle) * speed, Math.sin(randAngle) * speed);
+                    this.time.delayedCall(300, () => {
+                        if (mb && mb.active) mb.body.setVelocity(0, 0);
+                    });
+                }
+            }
+        });
+        mb._dashTimer = dashTimer;
+
+        // Pulse glow animation
+        this.tweens.add({
+            targets: mb, scaleX: 1.15, scaleY: 1.15,
+            duration: 400, yoyo: true, loop: -1, ease: 'Sine.easeInOut'
+        });
+
+        return mb;
+    }
+
+    _registerMiniBossOverlap(mb) {
+        // Player contact damages player
+        this.physics.add.overlap(this.player, mb, () => {
+            this.takeDamage();
+        });
+    }
+
+    _spawnSpiralBurst(mb) {
+        const count = 8;
+        for (let i = 0; i < count; i++) {
+            const angle = (Math.PI * 2 / count) * i;
+            const proj = this.add.circle(mb.x, mb.y, 6, mb._origColor || 0xff4400);
+            this.bossProjectiles.add(proj);
+            this.physics.add.existing(proj);
+            proj.body.setAllowGravity(false);
+            proj.body.setCollideWorldBounds(true);
+            proj.body.onWorldBounds = true;
+            const spd = 300 + Phaser.Math.Between(0, 60);
+            proj.body.setVelocity(Math.cos(angle) * spd, Math.sin(angle) * spd);
+            this.time.delayedCall(4000, () => { if (proj && proj.active) proj.destroy(); });
+        }
+    }
+
+    _spawnTripleShot(mb) {
+        const baseAngle = Phaser.Math.Angle.Between(mb.x, mb.y, this.player.x, this.player.y);
+        const offsets = [-0.25, 0, 0.25]; // slight spread
+        offsets.forEach((off, i) => {
+            this.time.delayedCall(i * 80, () => {
+                if (!mb || !mb.active) return;
+                const a = baseAngle + off;
+                const proj = this.add.circle(mb.x, mb.y, 7, 0xffffff);
+                proj.setStrokeStyle(2, mb._origColor || 0xff4400);
+                this.bossProjectiles.add(proj);
+                this.physics.add.existing(proj);
+                proj.body.setAllowGravity(false);
+                proj.body.setCollideWorldBounds(true);
+                proj.body.onWorldBounds = true;
+                const spd = 440 + Phaser.Math.Between(0, 80);
+                proj.body.setVelocity(Math.cos(a) * spd, Math.sin(a) * spd);
+                this.time.delayedCall(4500, () => { if (proj && proj.active) proj.destroy(); });
+            });
+        });
+    }
+
+    _damageMiniBoss(mb, amount) {
+        if (!mb || !mb.active) return;
+        mb.hp -= amount;
+
+        // Apply DoT on slash if Voltfire equipped
+        if (this.player.hasDot && !this._dotEnemies.has(mb)) {
+            // Reuse applyDotToEnemy — miniboss has hp/maxHp just like regular enemies
+            this.applyDotToEnemy(mb);
+        }
+
+        // Flash white
+        if (mb.hp > 0) {
+            const prev = mb._origColor;
+            mb.setFillStyle(0xffffff);
+            this.time.delayedCall(80, () => { if (mb.active) mb.setFillStyle(prev); });
+            return;
+        }
+
+        // Miniboss dies
+        mb.setActive(false).setVisible(false);
+        if (mb.body) mb.body.setEnable(false);
+        if (mb._atkTimer1) mb._atkTimer1.remove(false);
+        if (mb._atkTimer2) mb._atkTimer2.remove(false);
+        if (mb._dashTimer) mb._dashTimer.remove(false);
+
+        // Death explosion
+        const colors = [mb._origColor, 0xffffff, 0xff0000];
+        for (let i = 0; i < 12; i++) {
+            const ang = (Math.PI * 2 / 12) * i;
+            const spark = this.add.circle(mb.x, mb.y, 4, colors[i % colors.length]);
+            spark.setDepth(6);
+            this.tweens.add({
+                targets: spark, x: mb.x + Math.cos(ang) * 40, y: mb.y + Math.sin(ang) * 40,
+                alpha: 0, duration: 500, ease: 'Power2', onComplete: () => spark.destroy()
+            });
+        }
+        mb.destroy();
+
+        this._bossPhase2Count = (this._bossPhase2Count || 0) + 1;
+
+        if (this._bossPhase2Count >= 4) {
+            this._endBossPhase2();
+            this.showVictory();
+        } else {
+            // Update health bar to show remaining mini-bosses
+            const remaining = 4 - this._bossPhase2Count;
+            const healthFill = document.getElementById('boss-health-fill');
+            if (healthFill) healthFill.style.width = ((remaining / 4) * 100) + '%';
+
+            // Banner: how many left
+            const { width, height } = this.scale;
+            const txt = this.add.text(width / 2, height / 3,
+                `${remaining} FRAGMENT${remaining !== 1 ? 'S' : ''} REMAIN`,
+                { fontFamily: 'VT323', fontSize: '36px', color: '#ff8888', stroke: '#000', strokeThickness: 4 });
+            txt.setOrigin(0.5).setDepth(25);
+            this.tweens.add({
+                targets: txt, alpha: 0, y: txt.y - 40, duration: 300, delay: 1200,
+                onComplete: () => txt.destroy()
+            });
+        }
+    }
+
+    _endBossPhase2() {
+        this._bossPhase2Active = false;
+        this.bossActive = false;
+        this.bossProjectiles.clear(true, true);
+        if (this.bossWarningBar) { this.bossWarningBar.destroy(); this.bossWarningBar = null; }
+
+        // Hide boss health bar
+        document.getElementById('boss-health-container').classList.add('hidden');
+        document.getElementById('bossHealthLabel').classList.add('hidden');
     }
 
     startBossWave() {
@@ -754,6 +1506,7 @@ class GameScene extends Phaser.Scene {
         this.bossActive = true;
         this.enemies.clear(true, true);
         this.relics.clear(true, true);
+        if (this.splitterProjectiles) this.splitterProjectiles.clear(true, true);
 
         if (this.bossWarningBar) {
             this.bossWarningBar.destroy();
@@ -833,10 +1586,12 @@ class GameScene extends Phaser.Scene {
         modal.classList.remove('hidden');
     }
 
-    takeDamage() {
+    takeDamage(amount) {
         if (this.player.invulnerable) return;
+        const dmg = amount || 1;
 
         if (this.player.shieldCharges > 0) {
+            // Shield absorbs one "hit" regardless of damage amount
             this.player.shieldCharges--;
             this.updateAegisVisual();
 
@@ -857,7 +1612,7 @@ class GameScene extends Phaser.Scene {
             return;
         }
         
-        this.player.hp--;
+        this.player.hp -= dmg;
         this.player.invulnerable = true;
         
         // Update heart display
@@ -964,6 +1719,21 @@ class GameScene extends Phaser.Scene {
         this.currentWave = waveConfigs[this.waveIndex];
         this.waveKills = 0;
         this.updateWaveUI();
+
+        // Every 6 waves: spawn a squad of 2-3 Splitter enemies at wave start
+        if (this.waveIndex > 0 && this.waveIndex % 6 === 0 && !this.currentWave.bossWave) {
+            this._pendingSplitterSpawn = true; // spawned after grace ends in resetAfterUpgrade
+        }
+
+        // Every 3 waves (offset by 1): seed the wave with Cryo Burst enemies
+        if (this.waveIndex > 1 && (this.waveIndex + 1) % 3 === 0 && !this.currentWave.bossWave) {
+            this._pendingCryoBurstWave = true;
+        }
+
+        // After wave 10: spawn 1-2 Brutes each wave
+        if (this.waveIndex >= 10 && !this.currentWave.bossWave) {
+            this._pendingBruteSpawn = true;
+        }
 
         // Play downtime music during grace period
         try {

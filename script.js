@@ -124,6 +124,7 @@ class GameScene extends Phaser.Scene {
         this.load.image('arena1', './assets/backgrounds/arena1.png');
         this.load.audio('downtime', 'downtime.mp3'); // place downtime.mp3 alongside index.html
         this.load.audio('fusion', 'fusion.mp3');     // fusion sting
+        this.load.audio('freeze', 'freeze.mp3');     // secret relic activation
     }
 
     create() {
@@ -150,8 +151,11 @@ class GameScene extends Phaser.Scene {
         this.player.shieldCharges = 0;
         this.player.relics = [];       // Track collected relics
         this.player.fusedRelics = [];  // Track fused relics (max 2 per type)
+        this.player.secretRelics = []; // Track secret relics (e.g. "It's So Cold It Burns")
         this.player.hasDot = false;
         this.player.dotStacks = 0;
+        // One-shot mode state (set by "It's So Cold It Burns")
+        this._oneShotWavesLeft = 0;
         this.canFire = true;
         // Map of enemy -> { timer, ticksLeft } for DoT tracking
         this._dotEnemies = new Map();
@@ -201,13 +205,11 @@ class GameScene extends Phaser.Scene {
                 this.applyDotToEnemy(enemy);
             }
             // Only play hit sound + deal damage when NOT already invulnerable
-            // (invulnerable is set to true the instant damage lands, so this
-            //  fires exactly once per hit regardless of frame overlap count)
             if (!this.player.invulnerable) {
                 try { this.sound.play('hit', { volume: 0.7 }); } catch(e) {}
             }
             this.takeDamage();
-        });
+        });     
 
         // 9. Collision: Relic hits Player
         this.physics.add.overlap(this.player, this.relics, (p, relic) => {
@@ -220,7 +222,7 @@ class GameScene extends Phaser.Scene {
         if (!this.player || this.player.hp <= 0) return;
 
         // Movement Logic
-        const speed = 200;
+        const speed = 200 * (this.player.moveSpeedMultiplier || 1);
         this.player.body.setVelocity(0);
 
         if (this.keys.A.isDown || this.cursors.left.isDown) this.player.body.setVelocityX(-speed);
@@ -239,8 +241,12 @@ class GameScene extends Phaser.Scene {
             this.spawnEnemy();
         }
 
-        // Enemy AI: Follow Player (respect temporary modifier)
+        // Enemy AI: Follow Player (respect temporary modifier; skip frozen enemies)
         this.enemies.getChildren().forEach(enemy => {
+            if (enemy._frozen) {
+                if (enemy.body) enemy.body.setVelocity(0);
+                return;
+            }
             const speed = this.currentWave.enemySpeed * (this.enemySpeedModifier || 1);
             this.physics.moveToObject(enemy, this.player, speed);
         });
@@ -311,9 +317,16 @@ class GameScene extends Phaser.Scene {
             let diff = Math.abs(Phaser.Math.Angle.Wrap(angle - angleToEnemy));
 
             if (dist < this.currentWeapon.range && diff < this.currentWeapon.width / 2) {
-                // Base damage 1 + any bonus from Fracture Lens (max +2)
-                const dmg = 1 + (this.player.bonusDamage || 0);
+                // Base damage 1.5 + any bonus from Fracture Lens (max +2)
+                let dmg = 1.5 + (this.player.bonusDamage || 0);
+                // ONE-SHOT MODE: "It's So Cold It Burns" active
+                if (this._oneShotWavesLeft > 0) dmg = 99999;
                 enemy.hp = (enemy.hp || 1) - dmg;
+
+                // Cryo Shard: freeze the enemy on slash hit
+                if (this.player.hasCryo && !enemy._frozen) {
+                    this.applyCryoToEnemy(enemy);
+                }
 
                 // Flash white on hit
                 if (enemy.hp > 0) {
@@ -346,7 +359,15 @@ class GameScene extends Phaser.Scene {
             const bossDiff = Math.abs(Phaser.Math.Angle.Wrap(angle - angleToBoss));
 
             if (bossDist < this.currentWeapon.range && bossDiff < this.currentWeapon.width / 2) {
-                this.damageBoss(6);
+                let bossDmg = 6;
+                if (this._oneShotWavesLeft > 0) {
+                    // Deal 25% of boss max HP, then disable one-shot (consumed on boss hit)
+                    bossDmg = Math.ceil((this.boss.maxHp || 70) * 0.25);
+                    this._oneShotWavesLeft = 0;
+                    updateSecretRelicHUD();
+                    this._showOneShotExpiredNotice('Used on boss: -25% MAX HP!');
+                }
+                this.damageBoss(bossDmg);
             }
         }
 
@@ -456,10 +477,110 @@ class GameScene extends Phaser.Scene {
         const relicsContainer = document.getElementById('relics-container');
         if (relicsContainer) relicsContainer.innerHTML = '';
 
-        // Count badge: normal + fused relics
-        const total = this.player.relics.length + this.player.fusedRelics.length;
+        // Count badge: normal + fused + secret relics
+        const total = this.player.relics.length + this.player.fusedRelics.length + (this.player.secretRelics ? this.player.secretRelics.length : 0);
         const countEl = document.getElementById('relic-count');
         if (countEl) countEl.innerText = total;
+
+        // Update secret relic HUD button visibility
+        updateSecretRelicHUD();
+    }
+
+    // ── Secret Relic Activation ────────────────────────────────
+    activateSecretRelic() {
+        const sr = this.player.secretRelics && this.player.secretRelics.find(r => r.id === 'cold_burns' && r.charges > 0);
+        if (!sr) return;
+
+        sr.charges--;
+        this._oneShotWavesLeft = 5;
+        updateSecretRelicHUD();
+
+        // Play freeze sound
+        try { this.sound.play('freeze', { volume: 0.9 }); } catch(e) {}
+
+        // Full-screen rainbow flash
+        this._doRainbowFlash();
+
+        // Notification banner
+        this._showSecretActivationBanner();
+    }
+
+    _doRainbowFlash() {
+        const { width, height } = this.scale;
+        const overlay = this.add.rectangle(width / 2, height / 2, width, height, 0xffffff, 0);
+        overlay.setDepth(20);
+
+        // Cycle through hues with tweens
+        const colors = [0xff0000, 0xff7700, 0xffff00, 0x00ff00, 0x0099ff, 0x9900ff, 0xff00ff, 0xffffff];
+        let step = 0;
+        const flash = () => {
+            if (!overlay.active) return;
+            overlay.setFillStyle(colors[step % colors.length], 0.35);
+            step++;
+            if (step < 14) {
+                this.time.delayedCall(80, flash);
+            } else {
+                this.tweens.add({ targets: overlay, alpha: 0, duration: 300, onComplete: () => overlay.destroy() });
+            }
+        };
+        flash();
+
+        // Also freeze every current enemy instantly as bonus flair
+        this.enemies.getChildren().forEach(enemy => {
+            if (enemy && enemy.active) {
+                enemy.setFillStyle(0x88eeff);
+                enemy._frozen = true;
+                enemy._frozenUntil = Date.now() + 800;
+                this.time.delayedCall(800, () => {
+                    if (enemy && enemy.active) { enemy._frozen = false; }
+                });
+            }
+        });
+    }
+
+    _showSecretActivationBanner() {
+        const { width, height } = this.scale;
+        const txt = this.add.text(width / 2, height / 2 - 60,
+            "❄️🔥 IT'S SO COLD IT BURNS! 🔥❄️\n5 WAVES OF ONE-SHOT POWER!",
+            {
+                fontFamily: 'VT323',
+                fontSize: '38px',
+                color: '#ffffff',
+                stroke: '#000000',
+                strokeThickness: 4,
+                align: 'center',
+                shadow: { offsetX: 0, offsetY: 0, color: '#00ffff', blur: 18, fill: true }
+            }
+        );
+        txt.setOrigin(0.5);
+        txt.setDepth(25);
+        txt.setAlpha(0);
+
+        this.tweens.add({
+            targets: txt, alpha: 1, y: height / 2 - 80,
+            duration: 300, ease: 'Back.easeOut',
+            onComplete: () => {
+                this.time.delayedCall(2000, () => {
+                    this.tweens.add({ targets: txt, alpha: 0, duration: 400, onComplete: () => txt.destroy() });
+                });
+            }
+        });
+    }
+
+    _showOneShotExpiredNotice(msg) {
+        const { width, height } = this.scale;
+        const txt = this.add.text(width / 2, height / 2 - 40,
+            msg || '❄️ ONE-SHOT POWER EXPIRED',
+            { fontFamily: 'VT323', fontSize: '28px', color: '#aaddff', align: 'center',
+              stroke: '#000', strokeThickness: 3 }
+        );
+        txt.setOrigin(0.5);
+        txt.setDepth(25);
+        this.tweens.add({
+            targets: txt, alpha: 0, y: txt.y - 30,
+            duration: 1500, delay: 1000,
+            onComplete: () => txt.destroy()
+        });
     }
 
     /**
@@ -467,53 +588,135 @@ class GameScene extends Phaser.Scene {
      * Each stack adds an independent burn application.
      * @param {object} enemy – Phaser circle game object
      */
+
+    applyCryoToEnemy(enemy) {
+        if (!enemy || !enemy.active || enemy._frozen) return;
+
+        const stacks = this.player.cryoStacks || 1;
+        const freezeDuration = stacks * 1000; // 1s per stack, up to 3s
+
+        enemy._frozen = true;
+
+        // Visual: turn enemy icy blue and stop movement
+        const origColor = enemy.fillColor;
+        if (enemy.setFillStyle) enemy.setFillStyle(0x88eeff);
+        if (enemy.body) {
+            enemy.body.setVelocity(0);
+            // Store velocity override so moveToObject is blocked in update
+            enemy._frozenUntil = Date.now() + freezeDuration;
+        }
+
+        // Ice particle burst
+        for (let i = 0; i < 5; i++) {
+            const ang = (Math.PI * 2 / 5) * i;
+            const ix = enemy.x + Math.cos(ang) * 12;
+            const iy = enemy.y + Math.sin(ang) * 12;
+            const shard = this.add.circle(ix, iy, 3, 0xaaeeff, 1);
+            shard.setDepth(6);
+            this.tweens.add({
+                targets: shard, alpha: 0, scaleX: 0.2, scaleY: 0.2,
+                x: ix + Math.cos(ang) * 10, y: iy + Math.sin(ang) * 10,
+                duration: 400, ease: 'Power2',
+                onComplete: () => shard.destroy()
+            });
+        }
+
+        // Thaw after freeze duration
+        this.time.delayedCall(freezeDuration, () => {
+            if (enemy && enemy.active) {
+                enemy._frozen = false;
+                enemy._frozenUntil = 0;
+                if (enemy.setFillStyle) enemy.setFillStyle(origColor);
+            }
+        });
+    }
+
     applyDotToEnemy(enemy) {
         if (!enemy || !enemy.active) return;
 
-        // Use first Voltfire Matrix relic for stats
-        const voltfire = this.player.fusedRelics.find(r => r.id === 'voltfire_matrix');
-        if (!voltfire) return;
+        // Count Voltfire Matrix stacks: 1 = burn 20% of enemy max HP, 2 = 40%
+        const voltfireStacks = this.player.fusedRelics.filter(r => r.id === 'voltfire_matrix').length;
+        if (voltfireStacks === 0) return;
 
-        const { dotDamage, dotInterval, dotDuration } = voltfire;
-        const ticks = Math.floor(dotDuration / dotInterval);
+        // Don't stack a second burn on an already-burning enemy
+        if (this._dotEnemies.has(enemy)) return;
+
+        const TICKS = 3;
+        const TICK_INTERVAL = 800; // ~2.4s total burn
+        const burnPct = voltfireStacks >= 2 ? 0.40 : 0.20;
+
+        const enemyMaxHp = enemy.maxHp || enemy.hp || 1;
+        const dmgPerTick = (enemyMaxHp * burnPct) / TICKS;
+
+        // Sync dot HP tracker with current HP (slash may have already reduced it)
+        if (enemy._dotHp === undefined) enemy._dotHp = enemy.hp;
+
         let ticksDone = 0;
 
-        // Red flash tint on the enemy to show it's burning
-        if (enemy.setTint) enemy.setTint(0xff4400);
+        // Set initial burn colour: orange-red
+        const origColor = enemy.fillColor;
+        if (enemy.setFillStyle) enemy.setFillStyle(0xff2200);
 
         const dotTimer = this.time.addEvent({
-            delay: dotInterval,
-            repeat: ticks - 1,
+            delay: TICK_INTERVAL,
+            repeat: TICKS - 1,
             callback: () => {
                 if (!enemy || !enemy.active) {
                     dotTimer.remove(false);
                     this._dotEnemies.delete(enemy);
                     return;
                 }
-                // Deal damage by destroying enemy if it has no HP pool (standard circle enemies)
-                // We track a soft HP on the enemy itself
-                enemy._dotHp = (enemy._dotHp === undefined) ? 3 : enemy._dotHp;
-                enemy._dotHp -= dotDamage;
 
-                // Fire particle puff at enemy position
-                const spark = this.add.circle(enemy.x, enemy.y, 4, 0xff3300, 0.9);
-                this.tweens.add({ targets: spark, alpha: 0, scaleX: 2, scaleY: 2, duration: 300, onComplete: () => spark.destroy() });
+                // Deal tick damage
+                enemy._dotHp -= dmgPerTick;
+                enemy.hp = enemy._dotHp;
+
+                // Bright red flash on this tick, then settle back to orange-red burn colour
+                if (enemy.setFillStyle) {
+                    enemy.setFillStyle(0xff0000);
+                    this.time.delayedCall(130, () => {
+                        if (enemy && enemy.active && enemy.setFillStyle)
+                            enemy.setFillStyle(0xff2200);
+                    });
+                }
+
+                // Spark particle burst
+                const spark = this.add.circle(enemy.x, enemy.y, 5, 0xff2200, 1);
+                spark.setDepth(6);
+                this.tweens.add({
+                    targets: spark, alpha: 0, scaleX: 2.5, scaleY: 2.5,
+                    y: enemy.y - 14, duration: 350, ease: 'Power2',
+                    onComplete: () => spark.destroy()
+                });
+
+                // Rising damage number
+                const numTxt = this.add.text(
+                    enemy.x + Phaser.Math.Between(-6, 6), enemy.y - 10,
+                    '-' + Math.ceil(dmgPerTick) + ' DOT',
+                    { fontFamily: 'VT323', fontSize: '14px', color: '#ff4400' }
+                );
+                numTxt.setDepth(7);
+                this.tweens.add({
+                    targets: numTxt, alpha: 0, y: numTxt.y - 20, duration: 600,
+                    onComplete: () => numTxt.destroy()
+                });
 
                 ticksDone++;
+
                 if (enemy._dotHp <= 0) {
-                    // Relic-kill counts the same as a slash kill
                     if (shouldDropRelic()) this.spawnRelic(enemy.x, enemy.y);
                     enemy.destroy();
                     score++;
                     this.waveKills++;
                     document.getElementById('killCount').innerText = score;
-                    document.getElementById('waveProgress').innerText = `${this.waveKills} / ${this.currentWave.targetKills}`;
+                    document.getElementById('waveProgress').innerText =
+                        this.waveKills + ' / ' + this.currentWave.targetKills;
                     if (this.waveKills >= this.currentWave.targetKills) this.advanceWave();
                     dotTimer.remove(false);
                     this._dotEnemies.delete(enemy);
-                } else if (ticksDone >= ticks) {
-                    // Burn expired — reset tint
-                    if (enemy.active && enemy.clearTint) enemy.clearTint();
+                } else if (ticksDone >= TICKS) {
+                    // Burn expired -- restore original colour
+                    if (enemy.active && enemy.setFillStyle) enemy.setFillStyle(origColor);
                     this._dotEnemies.delete(enemy);
                 }
             }
@@ -521,7 +724,6 @@ class GameScene extends Phaser.Scene {
 
         this._dotEnemies.set(enemy, dotTimer);
     }
-
     damageBoss(amount) {
         if (!this.bossActive || !this.boss) return;
 
@@ -744,6 +946,15 @@ class GameScene extends Phaser.Scene {
     }
 
     advanceWave() {
+        // Tick down the one-shot power counter when a wave ends
+        if (this._oneShotWavesLeft > 0) {
+            this._oneShotWavesLeft--;
+            if (this._oneShotWavesLeft === 0) {
+                this._showOneShotExpiredNotice('❄️ ONE-SHOT POWER EXPIRED');
+            }
+            updateSecretRelicHUD();
+        }
+
         this.waveIndex++;
         if (this.waveIndex >= waveConfigs.length) {
             this.showVictory();
@@ -856,6 +1067,43 @@ function playFusionSound() {
     } catch(e) {}
 }
 
+function activateSecretRelicBtn() {
+    const scene = phaserGame && phaserGame.scene.scenes[0];
+    if (scene && scene.activateSecretRelic) scene.activateSecretRelic();
+}
+
+/** Updates the secret relic HUD button — shows charges remaining, hides when none. */
+function updateSecretRelicHUD() {
+    const scene = phaserGame && phaserGame.scene.scenes[0];
+    const btn = document.getElementById('secret-relic-btn');
+    if (!btn) return;
+
+    const sr = scene && scene.player && scene.player.secretRelics &&
+               scene.player.secretRelics.find(r => r.id === 'cold_burns');
+    const wavesLeft = (scene && scene._oneShotWavesLeft) || 0;
+
+    if (!sr) {
+        btn.classList.add('hidden');
+        return;
+    }
+
+    btn.classList.remove('hidden');
+
+    if (wavesLeft > 0) {
+        btn.disabled = true;
+        btn.innerHTML = `❄️🔥 <span id="secret-relic-label">ACTIVE — ${wavesLeft} WAVE${wavesLeft !== 1 ? 'S' : ''} LEFT</span>`;
+        btn.style.setProperty('--sr-glow', '#00ffff');
+    } else if (sr.charges > 0) {
+        btn.disabled = false;
+        btn.innerHTML = `❄️🔥 <span id="secret-relic-label">IT'S SO COLD IT BURNS</span>`;
+        btn.style.setProperty('--sr-glow', '#ff00ff');
+    } else {
+        btn.disabled = true;
+        btn.innerHTML = `❄️🔥 <span id="secret-relic-label">SPENT</span>`;
+        btn.style.setProperty('--sr-glow', '#444');
+    }
+}
+
 function applyPowerUp(type) {
     const scene = phaserGame.scene.scenes[0];
 
@@ -920,19 +1168,8 @@ function acceptRelic() {
         scene.updateRelicsDisplay();
         updateHeartsDisplay(scene.player.hp, scene.player.maxHp);
 
-        // Check if this triggers a fusion
-        const recipe = checkFusionAvailable(scene.player.relics);
-        if (recipe) {
-            const fusedRelic = { ...recipe.result };
-            const currentFusedCount = scene.player.fusedRelics.filter(r => r.id === fusedRelic.id).length;
-            const maxStack = fusedRelic.maxStack || 2;
-
-            if (currentFusedCount < maxStack) {
-                // Hold resume — show fusion modal first
-                showFusionModal(recipe, scene);
-                return; // pausedScene stays set; fusion modal will resume
-            }
-        }
+        // NOTE: Fusion is only offered during the grace period between waves.
+        // Grace screen fusion button handles it -- no mid-game prompt here.
     }
 
     if (pausedScene) {
@@ -999,24 +1236,36 @@ function acceptFusion() {
     if (_graceScene && _graceScene._graceFusionPending) {
         _graceScene._graceFusionPending = false;
         if (recipe) {
+            const scene = _graceScene;
+            // Remove one copy of each ingredient relic -- their effects are consumed by fusion
+            recipe.requires.forEach(reqId => {
+                const idx = scene.player.relics.findIndex(r => r.id === reqId);
+                if (idx !== -1) scene.player.relics.splice(idx, 1);
+            });
+            // Add fused relic, recalculate all stats from scratch, then apply new effect
             const fusedRelic = { ...recipe.result };
-            fusedRelic.effect(_graceScene.player, _graceScene.currentWeapon, _graceScene);
-            _graceScene.player.fusedRelics.push(fusedRelic);
-            _graceScene.updateRelicsDisplay();
-            updateHeartsDisplay(_graceScene.player.hp, _graceScene.player.maxHp);
-            // Hide the fusion button — used up
+            scene.player.fusedRelics.push(fusedRelic);
+            recalculatePlayerStats(scene);
+            fusedRelic.effect(scene.player, scene.currentWeapon, scene);
+            scene.updateRelicsDisplay();
+            updateHeartsDisplay(scene.player.hp, scene.player.maxHp);
             const btn = document.getElementById('grace-fusion-btn');
             if (btn) { btn.classList.add('hidden'); btn._recipe = null; }
         }
         return;
     }
 
-    // Normal mid-game pickup fusion
+    // Fallback mid-game fusion (safety path -- normally only grace screen triggers fusion)
     if (recipe && pausedScene) {
         const scene = pausedScene;
+        recipe.requires.forEach(reqId => {
+            const idx = scene.player.relics.findIndex(r => r.id === reqId);
+            if (idx !== -1) scene.player.relics.splice(idx, 1);
+        });
         const fusedRelic = { ...recipe.result };
-        fusedRelic.effect(scene.player, scene.currentWeapon, scene);
         scene.player.fusedRelics.push(fusedRelic);
+        recalculatePlayerStats(scene);
+        fusedRelic.effect(scene.player, scene.currentWeapon, scene);
         scene.updateRelicsDisplay();
         updateHeartsDisplay(scene.player.hp, scene.player.maxHp);
     }
@@ -1027,7 +1276,6 @@ function acceptFusion() {
         pausedScene = null;
     }
 }
-
 function declineFusion() {
     const modal = document.getElementById('fusion-modal');
     modal._pendingRecipe = null;
@@ -1069,11 +1317,12 @@ function openRelicInventory() {
     const scene = phaserGame && phaserGame.scene.scenes[0];
     const relics = (scene && scene.player) ? scene.player.relics : [];
     const fusedRelics = (scene && scene.player) ? scene.player.fusedRelics : [];
+    const secretRelics = (scene && scene.player) ? (scene.player.secretRelics || []) : [];
 
     const grid = document.getElementById('inventory-grid');
     grid.innerHTML = '';
 
-    const allRelics = [...relics, ...fusedRelics];
+    const allRelics = [...relics, ...fusedRelics, ...secretRelics];
 
     if (allRelics.length === 0) {
         grid.innerHTML = '<div class="inv-empty">No relics collected yet.<br>Defeat enemies to find them!</div>';
@@ -1095,36 +1344,53 @@ function openRelicInventory() {
             grid.appendChild(header);
             fusedRelics.forEach(relic => grid.appendChild(makeRelicCard(relic, true)));
         }
+
+        // Section header for secret relics
+        if (secretRelics.length > 0) {
+            const header = document.createElement('div');
+            header.style.cssText = 'grid-column:1/-1;font-size:13px;text-transform:uppercase;letter-spacing:1px;margin:8px 0 2px;background:linear-gradient(90deg,#ff00ff,#00ffff,#ff00ff);-webkit-background-clip:text;-webkit-text-fill-color:transparent;';
+            header.innerText = `🌈 Secret Relics`;
+            grid.appendChild(header);
+            secretRelics.forEach(relic => grid.appendChild(makeRelicCard(relic, false, true)));
+        }
     }
 
     document.getElementById('inventory-modal').classList.remove('hidden');
 }
 
-function makeRelicCard(relic, isFused) {
+function makeRelicCard(relic, isFused, isSecret) {
     const card = document.createElement('div');
-    card.className = 'inv-relic-card' + (isFused ? ' inv-relic-fused' : '');
+    card.className = 'inv-relic-card' + (isFused ? ' inv-relic-fused' : '') + (isSecret ? ' inv-relic-secret' : '');
     card.title = 'Click for more info';
-    const glowCol = relic.glowColor || '#ffffff';
+    const glowCol = isSecret ? '#ff00ff' : (relic.glowColor || '#ffffff');
     card.style.borderColor = glowCol;
-    card.style.boxShadow = `0 0 ${isFused ? 14 : 8}px ${glowCol}${isFused ? '88' : '44'}`;
+    card.style.boxShadow = `0 0 ${isFused ? 14 : isSecret ? 18 : 8}px ${glowCol}${isFused ? '88' : isSecret ? 'cc' : '44'}`;
     if (isFused) card.style.background = 'rgba(120,0,0,0.25)';
+    if (isSecret) card.style.background = 'rgba(80,0,80,0.3)';
+    const tag = isFused
+        ? ' <span style="color:#ff6666;font-size:10px;">FUSED</span>'
+        : isSecret
+            ? ' <span style="color:#ff00ff;font-size:10px;">SECRET</span>'
+            : '';
     card.innerHTML = `
-        <span class="inv-relic-icon">${relic.icon || '?'}</span>
-        <div class="inv-relic-name">${relic.name}${isFused ? ' <span style="color:#ff6666;font-size:10px;">FUSED</span>' : ''}</div>
+        <span class="inv-relic-icon${isSecret ? ' rainbow-icon' : ''}">${relic.icon || '?'}</span>
+        <div class="inv-relic-name">${relic.name}${tag}</div>
         <div class="inv-relic-desc">${relic.description}</div>
-        <button class="inv-discard-btn" title="Discard relic" onclick="event.stopPropagation(); confirmDiscardRelic('${relic.id}', ${isFused})">🗑</button>
+        <button class="inv-discard-btn" title="Discard relic" onclick="event.stopPropagation(); confirmDiscardRelic('${relic.id}', ${isFused}, ${isSecret ? 'true' : 'false'})">🗑</button>
     `;
     card.addEventListener('click', () => openRelicDetailModal(relic));
     return card;
 }
 
 let _pendingDiscard = null;
-function confirmDiscardRelic(relicId, isFused) {
-    _pendingDiscard = { relicId, isFused };
+function confirmDiscardRelic(relicId, isFused, isSecret) {
+    _pendingDiscard = { relicId, isFused, isSecret: !!isSecret };
     const scene = phaserGame && phaserGame.scene.scenes[0];
-    const pool = isFused
-        ? (scene && scene.player.fusedRelics) || []
-        : (scene && scene.player.relics) || [];
+    const pool = isSecret
+        ? (scene && scene.player.secretRelics) || []
+        : isFused
+            ? (scene && scene.player.fusedRelics) || []
+            : (scene && scene.player.relics) || [];
     const relic = pool.find(r => r.id === relicId);
     const name = relic ? relic.name : relicId;
 
@@ -1135,7 +1401,7 @@ function confirmDiscardRelic(relicId, isFused) {
 function confirmDiscard() {
     document.getElementById('discard-modal').classList.add('hidden');
     if (_pendingDiscard) {
-        throwRelic(_pendingDiscard.relicId, _pendingDiscard.isFused);
+        throwRelic(_pendingDiscard.relicId, _pendingDiscard.isFused, _pendingDiscard.isSecret);
         _pendingDiscard = null;
     }
 }
@@ -1171,11 +1437,16 @@ function closeInventoryOnBackdrop(e) {
 }
 
 // ===== THROW / DISCARD RELIC =====
-function throwRelic(relicId, isFused) {
+function throwRelic(relicId, isFused, isSecret) {
     const scene = phaserGame && phaserGame.scene.scenes[0];
     if (!scene || !scene.player) return;
 
-    if (isFused) {
+    if (isSecret) {
+        const idx = scene.player.secretRelics ? scene.player.secretRelics.findIndex(r => r.id === relicId) : -1;
+        if (idx !== -1) scene.player.secretRelics.splice(idx, 1);
+        // Also cancel one-shot if active
+        if (scene._oneShotWavesLeft > 0) scene._oneShotWavesLeft = 0;
+    } else if (isFused) {
         const idx = scene.player.fusedRelics.findIndex(r => r.id === relicId);
         if (idx !== -1) scene.player.fusedRelics.splice(idx, 1);
     } else {
@@ -1223,6 +1494,23 @@ function showGracePeriod(scene) {
         } else {
             fusionBtn.classList.add('hidden');
             fusionBtn._recipe = null;
+        }
+    }
+
+    // Check for secret fusion (available after wave 10)
+    const secretFusionBtn = document.getElementById('grace-secret-fusion-btn');
+    if (secretFusionBtn) {
+        const secretRecipeMatch = checkSecretFusionAvailable(
+            player.relics, player.fusedRelics, scene.waveIndex
+        );
+        // Also check player doesn't already have it in secretRelics
+        const alreadyHasSecret = player.secretRelics && player.secretRelics.some(r => r.id === 'cold_burns');
+        if (secretRecipeMatch && !alreadyHasSecret) {
+            secretFusionBtn.classList.remove('hidden');
+            secretFusionBtn._recipe = secretRecipeMatch;
+        } else {
+            secretFusionBtn.classList.add('hidden');
+            secretFusionBtn._recipe = null;
         }
     }
 
@@ -1291,6 +1579,66 @@ function offerGraceFusion() {
     document.getElementById('fusion-modal')._pendingRecipe = recipe;
     document.getElementById('fusion-modal').classList.remove('hidden');
     playFusionSound();
+}
+
+/**
+ * Offer the secret ??? relic fusion from the grace screen.
+ */
+function offerGraceSecretFusion() {
+    const btn = document.getElementById('grace-secret-fusion-btn');
+    if (!btn || !btn._recipe || !_graceScene) return;
+
+    _graceScene._graceSecretFusionPending = true;
+
+    // Show the secret fusion modal
+    const modal = document.getElementById('secret-fusion-modal');
+    if (!modal) return;
+    modal._pendingRecipe = btn._recipe;
+    document.getElementById('secret-fusion-modal').classList.remove('hidden');
+
+    // Play fusion sound
+    playFusionSound();
+}
+
+function acceptSecretFusion() {
+    const modal = document.getElementById('secret-fusion-modal');
+    const recipe = modal && modal._pendingRecipe;
+    if (modal) { modal._pendingRecipe = null; modal.classList.add('hidden'); }
+
+    if (_graceScene && _graceScene._graceSecretFusionPending) {
+        _graceScene._graceSecretFusionPending = false;
+        if (recipe && _graceScene.player) {
+            const scene = _graceScene;
+            // Consume ingredients: remove one of each normal ingredient
+            recipe.requiresNormal.forEach(reqId => {
+                const idx = scene.player.relics.findIndex(r => r.id === reqId);
+                if (idx !== -1) scene.player.relics.splice(idx, 1);
+            });
+            // Remove one of each fused ingredient
+            recipe.requiresFused.forEach(reqId => {
+                const idx = scene.player.fusedRelics.findIndex(r => r.id === reqId);
+                if (idx !== -1) scene.player.fusedRelics.splice(idx, 1);
+            });
+            // Grant the secret relic
+            const newSR = { ...recipe.result, charges: 1 };
+            scene.player.secretRelics = scene.player.secretRelics || [];
+            scene.player.secretRelics.push(newSR);
+            recalculatePlayerStats(scene);
+            scene.updateRelicsDisplay();
+            updateHeartsDisplay(scene.player.hp, scene.player.maxHp);
+            updateSecretRelicHUD();
+
+            // Hide secret fusion button
+            const sfBtn = document.getElementById('grace-secret-fusion-btn');
+            if (sfBtn) { sfBtn.classList.add('hidden'); sfBtn._recipe = null; }
+        }
+    }
+}
+
+function declineSecretFusion() {
+    const modal = document.getElementById('secret-fusion-modal');
+    if (modal) { modal._pendingRecipe = null; modal.classList.add('hidden'); }
+    if (_graceScene) _graceScene._graceSecretFusionPending = false;
 }
 
 // ===== DOWNSIDE CARD SYSTEM =====
@@ -1366,12 +1714,10 @@ function applyDownside(id) {
     if (scene) {
         const option = DOWNSIDE_OPTIONS.find(o => o.id === id);
         if (option) option.apply(scene);
-        // Downside IS the wave transition — no buff screen follows. Just resume.
-        scene.inputLocked = false;
-        scene.updateWaveUI();
-        if (scene.resetAfterUpgrade) scene.resetAfterUpgrade();
-        scene.scene.resume();
-        if (scene.currentWave.bossWave) scene.startBossWave();
+        
+        // FIX: Instead of resuming the scene here and skipping the power-up,
+        // we now transition directly into the evolve/power-up selection screen.
+        scene.showEvolveScreen();
     }
 }
 
@@ -1388,12 +1734,12 @@ function endGracePeriod() {
     if (scene.stopDowntimeMusic) scene.stopDowntimeMusic();
 
     // Every 4th completed wave (waveIndex is already incremented), show a downside card
-    // waveIndex is 1-based at this point (wave 1 just finished = waveIndex 1 now = about to play wave 2)
-    if (scene.waveIndex > 0 && scene.waveIndex % 4 === 0) {
+    // Skip for the boss wave -- it goes straight to evolve then boss fight
+    if (scene.waveIndex > 0 && scene.waveIndex % 4 === 0 && !scene.currentWave.bossWave) {
         showDownsideScreen(scene);
-        return; // showDownsideScreen will call showEvolveScreen when done
+        return; // showDownsideScreen will now safely chain into showEvolveScreen when completed
     }
 
-    // Show evolve/power-up screen
+    // Show evolve/power-up screen normally for non-corrupted waves
     scene.showEvolveScreen();
 }

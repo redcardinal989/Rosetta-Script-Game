@@ -55,6 +55,10 @@
             <button id="inventory-btn" onclick="openRelicInventory()" title="View your relics">
                 🎒 RELICS <span id="relic-count">0</span>
             </button>
+            <!-- Secret relic activate button — only visible when owned -->
+            <button id="secret-relic-btn" class="hidden secret-relic-btn" onclick="activateSecretRelicBtn()" title="Activate It's So Cold It Burns">
+                ❄️🔥 <span id="secret-relic-label">IT'S SO COLD IT BURNS</span>
+            </button>
         </div>
     </div>
 
@@ -121,6 +125,7 @@
             <button id="grace-start-btn" onclick="endGracePeriod()">▶ START NEXT WAVE</button>
             <button onclick="openRelicInventory()" style="border-color:#00ff99; color:#00ff99; font-size:20px; padding:8px 24px; margin-top:0;">🎒 VIEW RELICS</button>
             <button id="grace-fusion-btn" onclick="offerGraceFusion()" class="hidden" style="border-color:#ff4444; color:#ff4444; font-size:20px; padding:8px 24px; margin-top:0; animation: graceFusionPulse 1.2s ease-in-out infinite alternate;">⚗️ FUSE RELICS</button>
+            <button id="grace-secret-fusion-btn" onclick="offerGraceSecretFusion()" class="hidden" style="border-color:#ff00ff; color:#ff00ff; font-size:20px; padding:8px 24px; margin-top:0; animation: secretFusionPulse 1.0s ease-in-out infinite alternate;">🌈 ??? SECRET FUSION ???</button>
         </div>
     </div>
 
@@ -157,6 +162,31 @@
             <div style="display:flex; gap:14px; justify-content:center;">
                 <button onclick="confirmDiscard()" style="background:linear-gradient(135deg,#cc0000,#880000);color:#fff;border-color:#ff4444;box-shadow:0 0 16px rgba(200,0,0,0.4);">🗑 DISCARD</button>
                 <button onclick="cancelDiscard()" style="border-color:#666;color:#888;">KEEP IT</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Secret Fusion Modal — "It's So Cold It Burns" -->
+    <div id="secret-fusion-modal" class="relic-modal hidden">
+        <div class="relic-modal-content secret-fusion-content">
+            <div class="modal-icon secret-fusion-question" style="font-size:80px; animation: secretQuestionPulse 0.8s ease-in-out infinite alternate;">???</div>
+            <h2 style="margin:0 0 6px 0; font-size:32px; letter-spacing:3px;" class="rainbow-text">SECRET FUSION UNLOCKED</h2>
+            <p style="font-size:14px; color:#cc88ff; margin:0 0 14px 0; letter-spacing:1px;">Only obtainable after Wave 10. Max 1.</p>
+            <div style="width:100%; height:1px; background:linear-gradient(90deg,transparent,#ff00ff,#00ffff,transparent); margin-bottom:16px;"></div>
+            <div style="font-size:22px; color:#ffaaff; margin-bottom:10px; letter-spacing:1px;">
+                🔷 Fracture Lens &nbsp;+&nbsp; ❄️ Cryo Shard &nbsp;+&nbsp; 🔴 Voltfire Matrix
+            </div>
+            <div style="font-size:28px; font-weight:bold; margin-bottom:8px;" class="rainbow-text">It's So Cold It Burns</div>
+            <p style="font-size:15px; color:#eeccff; line-height:1.5; margin:0 0 10px 0; max-width:420px; text-align:center;">
+                A legendary convergence of ice and fire. Activate from the HUD to
+                <strong style="color:#ffffff;">one-shot all enemies for 5 waves</strong>,
+                or strip <strong style="color:#ffffff;">25% of a boss's max HP</strong> on the next hit.
+                Single use.
+            </p>
+            <p style="font-size:13px; color:#888; margin:0 0 22px 0;">All three source relics are consumed on fusion.</p>
+            <div style="display:flex; gap:16px; justify-content:center; flex-wrap:wrap;">
+                <button onclick="acceptSecretFusion()" class="secret-fusion-accept-btn">🌈 UNLOCK IT</button>
+                <button onclick="declineSecretFusion()" style="border-color:#555; color:#888; font-size:20px; padding:12px 32px;">✖ NOT NOW</button>
             </div>
         </div>
     </div>

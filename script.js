@@ -62,11 +62,21 @@ function createWaveConfig(index) {
     const phase = Math.floor(index / waveTemplateBase.length);
     const mixedWave = ((index + 1) % 5 === 0);
 
+    // After wave 5 enemies gain HP so we give the player breathing room:
+    // speed is reduced by 18% and spawn rate is 30% slower (higher threshold = less frequent)
+    const postScalingWave = index >= 5;
+    const speedMultiplier = postScalingWave
+        ? (1 + phase * 0.12) * 0.82   // 18% slower than it would otherwise be
+        : (1 + phase * 0.12);
+    const spawnThreshold = postScalingWave
+        ? Math.min(96, Math.max(86, template.spawnThreshold - phase * 2 - (index % 4) + 4))  // harder to spawn
+        : Math.max(82, template.spawnThreshold - phase * 2 - (index % 4));
+
     return {
         title: `WAVE ${index + 1}: ${template.title}`,
         targetKills: template.targetKills + phase * 2 + (index % 3),
-        enemySpeed: Math.round(template.enemySpeed * (1 + phase * 0.12)),
-        spawnThreshold: Math.max(82, template.spawnThreshold - phase * 2 - (index % 4)),
+        enemySpeed: Math.round(template.enemySpeed * speedMultiplier),
+        spawnThreshold,
         enemyColor: template.enemyColor,
         enemyTypes: mixedWave ? [0xff0033, 0xff9933, 0x33ccff, 0xff00ff] : [template.enemyColor],
         description: template.description,
@@ -101,73 +111,7 @@ function generateWaveConfigs() {
 }
 
 const waveConfigs = generateWaveConfigs();
-// --- MISSING RELIC LOGIC & DATA STRUCTURES ---
-
-/**
- * Determines if an enemy drops a relic on death.
- * @returns {boolean} 20% drop rate
- */
-function shouldDropRelic() {
-    return Math.random() < 0.20; 
-}
-
-/**
- * Repository of relic blueprints with their scaling, visual themes, and stat modifiers.
- */
-const relicPool = [
-    {
-        name: 'Overclock Core',
-        icon: '⚡',
-        description: 'Permanent +15% attack speed.',
-        color: 0xffd700,
-        glowColor: '#ffd700',
-        effect: (player, weapon, scene) => {
-            player.reloadModifier *= 0.85;
-        }
-    },
-    {
-        name: 'Titanium Shell',
-        icon: '🛡️',
-        description: 'Increases Maximum HP by 1 and grants a shield charge.',
-        color: 0x888888,
-        glowColor: '#888888',
-        effect: (player, weapon, scene) => {
-            player.maxHp += 1;
-            player.hp += 1; // Heal for the newly added point
-            player.shieldCharges += 1;
-        }
-    },
-    {
-        name: 'Plasma Extender',
-        icon: '📏',
-        description: 'Extends attack weapon reach by +25 units.',
-        color: 0x00ffff,
-        glowColor: '#00ffff',
-        effect: (player, weapon, scene) => {
-            weapon.range += 25;
-        }
-    },
-    {
-        name: 'Siphon Circuit',
-        icon: '🧪',
-        description: 'Heals 1 HP point instantly upon pickup.',
-        color: 0x33cc33,
-        glowColor: '#33cc33',
-        effect: (player, weapon, scene) => {
-            player.hp = Math.min(player.maxHp, player.hp + 1);
-        }
-    }
-];
-
-/**
- * Fetches a random relic. You can scale pool choices by wave index here if desired.
- * @param {number} waveIndex 
- */
-function getRandomRelicForWave(waveIndex) {
-    const randomIndex = Phaser.Math.Between(0, relicPool.length - 1);
-    // Return a deep copy clone so modifying instances doesn't mutate our base configuration pool
-    return { ...relicPool[randomIndex] };
-}
+// Relic data & helpers are defined in relics.js (loaded before this file)
 class GameScene extends Phaser.Scene {
     constructor() {
         super('GameScene');
@@ -176,7 +120,10 @@ class GameScene extends Phaser.Scene {
     preload() {
         // Placeholder sounds - replace with your actual files
         this.load.audio('sword', 'https://labs.phaser.io/assets/audio/SoundEffects/squit.wav');
+        this.load.audio('hit', 'hit.mp3');  // place hit.mp3 alongside index.html
         this.load.image('arena1', './assets/backgrounds/arena1.png');
+        this.load.audio('downtime', 'downtime.mp3'); // place downtime.mp3 alongside index.html
+        this.load.audio('fusion', 'fusion.mp3');     // fusion sting
     }
 
     create() {
@@ -201,8 +148,13 @@ class GameScene extends Phaser.Scene {
         this.player.invulnerable = false;
         this.player.reloadModifier = 1;
         this.player.shieldCharges = 0;
-        this.player.relics = []; // Track collected relics
+        this.player.relics = [];       // Track collected relics
+        this.player.fusedRelics = [];  // Track fused relics (max 2 per type)
+        this.player.hasDot = false;
+        this.player.dotStacks = 0;
         this.canFire = true;
+        // Map of enemy -> { timer, ticksLeft } for DoT tracking
+        this._dotEnemies = new Map();
 
         // Initialize heart display
         setTimeout(() => updateHeartsDisplay(this.player.hp, this.player.maxHp), 100);
@@ -222,6 +174,7 @@ class GameScene extends Phaser.Scene {
 
         // Enemy speed modifier (used to temporarily slow enemies after upgrades)
         this.enemySpeedModifier = 1;
+        this.inputLocked = false; // true during grace/evolve screens — blocks clicks
         this.bossActive = false;
         this.boss = null;
         this.bossWarningBar = null;
@@ -243,6 +196,16 @@ class GameScene extends Phaser.Scene {
 
         // 8. Collision: Enemy hits Player
         this.physics.add.overlap(this.player, this.enemies, (p, enemy) => {
+            // Apply DoT if player owns a Voltfire Matrix
+            if (this.player.hasDot && !this._dotEnemies.has(enemy)) {
+                this.applyDotToEnemy(enemy);
+            }
+            // Only play hit sound + deal damage when NOT already invulnerable
+            // (invulnerable is set to true the instant damage lands, so this
+            //  fires exactly once per hit regardless of frame overlap count)
+            if (!this.player.invulnerable) {
+                try { this.sound.play('hit', { volume: 0.7 }); } catch(e) {}
+            }
             this.takeDamage();
         });
 
@@ -265,6 +228,12 @@ class GameScene extends Phaser.Scene {
         if (this.keys.W.isDown || this.cursors.up.isDown) this.player.body.setVelocityY(-speed);
         if (this.keys.S.isDown || this.cursors.down.isDown) this.player.body.setVelocityY(speed);
 
+        // Keep aegis ring centered on player
+        if (this._aegisRing && this._aegisRing.active) {
+            this._aegisRing.x = this.player.x;
+            this._aegisRing.y = this.player.y;
+        }
+
         // Enemy Spawning (Random chance per frame)
         if (!this.bossActive && !this.currentWave.bossWave && Phaser.Math.Between(0, 100) > this.currentWave.spawnThreshold) {
             this.spawnEnemy();
@@ -278,6 +247,7 @@ class GameScene extends Phaser.Scene {
     }
 
     handleAttack(pointer) {
+        if (this.inputLocked) return;  // grace / evolve screens are open
         if (!this.canFire) return;
         this.canFire = false;
 
@@ -286,11 +256,53 @@ class GameScene extends Phaser.Scene {
 
         const angle = Phaser.Math.Angle.Between(this.player.x, this.player.y, pointer.worldX, pointer.worldY);
         
-        // Slash Visual
+        // Slash Visual — blue/purple arc with particle burst
         const arc = this.add.graphics();
-        arc.fillStyle(0x00ffff, 0.3);
-        arc.slice(this.player.x, this.player.y, this.currentWeapon.range, angle - this.currentWeapon.width/2, angle + this.currentWeapon.width/2);
+
+        // Outer glow layer (purple tint) — kept subtle so rapid clicks don't stack blindingly
+        arc.fillStyle(0x6600ff, 0.10);
+        arc.slice(this.player.x, this.player.y, this.currentWeapon.range, angle - this.currentWeapon.width / 2, angle + this.currentWeapon.width / 2);
         arc.fillPath();
+
+        // Inner core layer (electric blue)
+        arc.fillStyle(0x44aaff, 0.28);
+        arc.slice(this.player.x, this.player.y, this.currentWeapon.range * 0.7, angle - this.currentWeapon.width / 2, angle + this.currentWeapon.width / 2);
+        arc.fillPath();
+
+        // Bright edge highlight
+        arc.lineStyle(1.5, 0xaaddff, 0.7);
+        arc.beginPath();
+        arc.arc(this.player.x, this.player.y, this.currentWeapon.range, angle - this.currentWeapon.width / 2, angle + this.currentWeapon.width / 2);
+        arc.strokePath();
+
+        // Particle burst — reduced count so rapid fire stays readable
+        const particleColors = [0x4488ff, 0x7733ff, 0xaaddff, 0x9900ff, 0x00ccff];
+        const particleCount = 8;
+        for (let i = 0; i < particleCount; i++) {
+            const t = i / (particleCount - 1);
+            const spreadAngle = (angle - this.currentWeapon.width / 2) + t * this.currentWeapon.width;
+            const dist = Phaser.Math.Between(this.currentWeapon.range * 0.3, this.currentWeapon.range * 0.85);
+            const px = this.player.x + Math.cos(spreadAngle) * dist;
+            const py = this.player.y + Math.sin(spreadAngle) * dist;
+            const size = Phaser.Math.Between(2, 4);
+            const col = particleColors[Phaser.Math.Between(0, particleColors.length - 1)];
+            const p = this.add.circle(px, py, size, col, 0.75);
+            p.setDepth(5);
+
+            const driftX = Math.cos(spreadAngle) * Phaser.Math.Between(6, 18);
+            const driftY = Math.sin(spreadAngle) * Phaser.Math.Between(6, 18);
+            this.tweens.add({
+                targets: p,
+                x: px + driftX,
+                y: py + driftY,
+                alpha: 0,
+                scaleX: 0.1,
+                scaleY: 0.1,
+                duration: Phaser.Math.Between(100, 200),
+                ease: 'Power2',
+                onComplete: () => p.destroy()
+            });
+        }
 
         // Hit Detection
         this.enemies.getChildren().forEach(enemy => {
@@ -299,7 +311,19 @@ class GameScene extends Phaser.Scene {
             let diff = Math.abs(Phaser.Math.Angle.Wrap(angle - angleToEnemy));
 
             if (dist < this.currentWeapon.range && diff < this.currentWeapon.width / 2) {
-                // Check if relic should drop
+                // Base damage 1 + any bonus from Fracture Lens (max +2)
+                const dmg = 1 + (this.player.bonusDamage || 0);
+                enemy.hp = (enemy.hp || 1) - dmg;
+
+                // Flash white on hit
+                if (enemy.hp > 0) {
+                    const prevFill = enemy.fillColor;
+                    enemy.setFillStyle(0xffffff);
+                    this.time.delayedCall(80, () => { if (enemy.active) enemy.setFillStyle(prevFill); });
+                    return; // still alive
+                }
+
+                // Enemy dies
                 if (shouldDropRelic()) {
                     this.spawnRelic(enemy.x, enemy.y);
                 }
@@ -326,8 +350,8 @@ class GameScene extends Phaser.Scene {
             }
         }
 
-        // Fade Slash
-        this.tweens.add({ targets: arc, alpha: 0, duration: 200, onComplete: () => arc.destroy() });
+        // Fade Slash — quick fade so stacked arcs don't linger
+        this.tweens.add({ targets: arc, alpha: 0, duration: 120, onComplete: () => arc.destroy() });
 
         // Cooldown
         this.time.delayedCall(this.currentWeapon.reload * this.player.reloadModifier, () => {
@@ -346,6 +370,18 @@ class GameScene extends Phaser.Scene {
         const enemy = this.add.circle(x, y, 8, enemyColor);
         this.enemies.add(enemy);
         this.physics.add.existing(enemy);
+
+        // HP scaling: every 5 waves enemies gain +1 max HP
+        // Wave 1-4 = 1hp, Wave 5-9 = 2hp, Wave 10-14 = 3hp, etc.
+        const hpTier = Math.floor(this.waveIndex / 5);
+        enemy.hp = 1 + hpTier;
+        enemy.maxHp = enemy.hp;
+
+        // Visual indicator for tankier enemies: stroke thickness grows with HP
+        if (hpTier > 0) {
+            const strokeColor = hpTier >= 3 ? 0xffffff : hpTier >= 2 ? 0xffcc00 : 0xaaaaaa;
+            enemy.setStrokeStyle(1 + hpTier, strokeColor);
+        }
     }
 
     spawnRelic(x, y) {
@@ -382,30 +418,15 @@ class GameScene extends Phaser.Scene {
     pickupRelic(relicSprite) {
         const relic = relicSprite.relicData;
 
-        if (this.player.relics.length >= 10) {
-            relicSprite.destroy();
-            return;
-        }
-        
-        // Add to player's relic collection
-        this.player.relics.push(relic);
-        
-        // Apply relic effect
-        relic.effect(this.player, this.currentWeapon, this);
-        
-        // Pause the scene and show modal
+        // Immediately destroy so overlap doesn't re-fire
+        relicSprite.destroy();
+
+        if (this.player.relics.length >= 10) return;
+
+        // Pause the scene and show the accept/decline modal BEFORE applying any effect
         pausedScene = this;
         this.scene.pause();
         this.showRelicModal(relic);
-        
-        // Update HUD
-        this.updateRelicsDisplay();
-        
-        // Update health display if MaxHp changed
-        updateHeartsDisplay(this.player.hp, this.player.maxHp);
-        
-        // Remove relic from world
-        relicSprite.destroy();
     }
 
     // Reset enemies and player after picking an upgrade so they can react easier
@@ -434,10 +455,71 @@ class GameScene extends Phaser.Scene {
     updateRelicsDisplay() {
         const relicsContainer = document.getElementById('relics-container');
         if (relicsContainer) relicsContainer.innerHTML = '';
-        
-        // Update count badge on HUD button
+
+        // Count badge: normal + fused relics
+        const total = this.player.relics.length + this.player.fusedRelics.length;
         const countEl = document.getElementById('relic-count');
-        if (countEl) countEl.innerText = this.player.relics.length;
+        if (countEl) countEl.innerText = total;
+    }
+
+    /**
+     * Burns an enemy with damage-over-time from the Voltfire Matrix fused relic.
+     * Each stack adds an independent burn application.
+     * @param {object} enemy – Phaser circle game object
+     */
+    applyDotToEnemy(enemy) {
+        if (!enemy || !enemy.active) return;
+
+        // Use first Voltfire Matrix relic for stats
+        const voltfire = this.player.fusedRelics.find(r => r.id === 'voltfire_matrix');
+        if (!voltfire) return;
+
+        const { dotDamage, dotInterval, dotDuration } = voltfire;
+        const ticks = Math.floor(dotDuration / dotInterval);
+        let ticksDone = 0;
+
+        // Red flash tint on the enemy to show it's burning
+        if (enemy.setTint) enemy.setTint(0xff4400);
+
+        const dotTimer = this.time.addEvent({
+            delay: dotInterval,
+            repeat: ticks - 1,
+            callback: () => {
+                if (!enemy || !enemy.active) {
+                    dotTimer.remove(false);
+                    this._dotEnemies.delete(enemy);
+                    return;
+                }
+                // Deal damage by destroying enemy if it has no HP pool (standard circle enemies)
+                // We track a soft HP on the enemy itself
+                enemy._dotHp = (enemy._dotHp === undefined) ? 3 : enemy._dotHp;
+                enemy._dotHp -= dotDamage;
+
+                // Fire particle puff at enemy position
+                const spark = this.add.circle(enemy.x, enemy.y, 4, 0xff3300, 0.9);
+                this.tweens.add({ targets: spark, alpha: 0, scaleX: 2, scaleY: 2, duration: 300, onComplete: () => spark.destroy() });
+
+                ticksDone++;
+                if (enemy._dotHp <= 0) {
+                    // Relic-kill counts the same as a slash kill
+                    if (shouldDropRelic()) this.spawnRelic(enemy.x, enemy.y);
+                    enemy.destroy();
+                    score++;
+                    this.waveKills++;
+                    document.getElementById('killCount').innerText = score;
+                    document.getElementById('waveProgress').innerText = `${this.waveKills} / ${this.currentWave.targetKills}`;
+                    if (this.waveKills >= this.currentWave.targetKills) this.advanceWave();
+                    dotTimer.remove(false);
+                    this._dotEnemies.delete(enemy);
+                } else if (ticksDone >= ticks) {
+                    // Burn expired — reset tint
+                    if (enemy.active && enemy.clearTint) enemy.clearTint();
+                    this._dotEnemies.delete(enemy);
+                }
+            }
+        });
+
+        this._dotEnemies.set(enemy, dotTimer);
     }
 
     damageBoss(amount) {
@@ -541,12 +623,11 @@ class GameScene extends Phaser.Scene {
 
     showRelicModal(relic) {
         const modal = document.getElementById('relic-modal');
-        const icon = document.getElementById('modal-icon');
-        const description = document.getElementById('modal-description');
-        
-        icon.innerText = relic.icon;
-        description.innerText = `${relic.description}\n\nCollected!`;
-        
+        document.getElementById('modal-icon').innerText = relic.icon;
+        document.getElementById('modal-title').innerText = 'RELIC FOUND';
+        document.getElementById('modal-description').innerText = relic.description;
+        // Store pending relic for accept/decline
+        modal._pendingRelic = relic;
         modal.classList.remove('hidden');
     }
 
@@ -555,6 +636,22 @@ class GameScene extends Phaser.Scene {
 
         if (this.player.shieldCharges > 0) {
             this.player.shieldCharges--;
+            this.updateAegisVisual();
+
+            // Brief iframes after each shield hit — same enemy can't drain multiple
+            // charges in the same physics frame or burst of frames
+            this.player.invulnerable = true;
+            // Flash the ring white to signal absorption
+            if (this._aegisRing && this._aegisRing.active) {
+                const prevStroke = this._aegisRing.strokeColor;
+                this._aegisRing.setStrokeStyle(6, 0xffffff);
+                this.time.delayedCall(120, () => {
+                    if (this._aegisRing && this._aegisRing.active) {
+                        this.updateAegisVisual(); // restore correct color
+                    }
+                });
+            }
+            this.time.delayedCall(500, () => { this.player.invulnerable = false; });
             return;
         }
         
@@ -576,6 +673,76 @@ class GameScene extends Phaser.Scene {
         }
     }
 
+    // ── Aegis Core visual shield ring ────────────────────────
+    updateAegisVisual() {
+        // Only show ring if the Aegis Core fused relic is active
+        const hasAegis = this.player.fusedRelics && this.player.fusedRelics.some(r => r.id === 'aegis_core');
+        if (!hasAegis) {
+            if (this._aegisRing) { this._aegisRing.destroy(); this._aegisRing = null; }
+            return;
+        }
+
+        const charges = this.player.shieldCharges || 0;
+
+        if (charges <= 0) {
+            // Shield broken — destroy ring and start 30s recharge
+            if (this._aegisRing) { this._aegisRing.destroy(); this._aegisRing = null; }
+            this._startAegisRecharge();
+            return;
+        }
+
+        // Create or update the ring
+        if (!this._aegisRing || !this._aegisRing.active) {
+            this._aegisRing = this.add.circle(this.player.x, this.player.y, 22, 0x00ccff, 0);
+            this._aegisRing.setStrokeStyle(3, 0x00ccff);
+            this._aegisRing.setDepth(4);
+        }
+        // Recolor based on remaining charges: 4=cyan, 3=blue, 2=yellow, 1=red
+        const colors = [0xff3333, 0xffcc00, 0x4488ff, 0x00ccff];
+        const col = colors[Math.min(charges - 1, 3)];
+        this._aegisRing.setStrokeStyle(2 + charges, col);
+        // Pulse tween
+        if (!this._aegisTween || !this._aegisTween.isPlaying()) {
+            this._aegisTween = this.tweens.add({
+                targets: this._aegisRing,
+                scaleX: 1.12, scaleY: 1.12,
+                duration: 700, yoyo: true, loop: -1, ease: 'Sine.easeInOut'
+            });
+        }
+    }
+
+    _startAegisRecharge() {
+        if (this._aegisRecharging) return;
+        this._aegisRecharging = true;
+
+        // Show a small recharge label above the player position via DOM
+        const hudEl = document.getElementById('aegis-recharge-hud');
+        if (hudEl) {
+            hudEl.classList.remove('hidden');
+            let t = 30;
+            hudEl.innerText = `🛡 RECHARGING ${t}s`;
+            const iv = setInterval(() => {
+                t--;
+                if (hudEl) hudEl.innerText = `🛡 RECHARGING ${t}s`;
+                if (t <= 0) {
+                    clearInterval(iv);
+                    this._aegisRecharging = false;
+                    if (hudEl) hudEl.classList.add('hidden');
+                    // Restore 4 shield charges and re-draw ring
+                    this.player.shieldCharges = 4;
+                    this.updateAegisVisual();
+                }
+            }, 1000);
+        } else {
+            // Fallback: use Phaser timer if HUD element missing
+            this.time.delayedCall(30000, () => {
+                this._aegisRecharging = false;
+                this.player.shieldCharges = 4;
+                this.updateAegisVisual();
+            });
+        }
+    }
+
     advanceWave() {
         this.waveIndex++;
         if (this.waveIndex >= waveConfigs.length) {
@@ -587,9 +754,27 @@ class GameScene extends Phaser.Scene {
         this.waveKills = 0;
         this.updateWaveUI();
 
+        // Play downtime music during grace period
+        try {
+            if (this.downtimeMusic) { this.downtimeMusic.stop(); this.downtimeMusic.destroy(); }
+            this.downtimeMusic = this.sound.add('downtime', { loop: true, volume: 0.5 });
+            this.downtimeMusic.play();
+        } catch(e) {}
+
         // Show grace period screen before evolve
+        this.inputLocked = true;
         this.scene.pause();
         showGracePeriod(this);
+    }
+
+    stopDowntimeMusic() {
+        try {
+            if (this.downtimeMusic) {
+                this.downtimeMusic.stop();
+                this.downtimeMusic.destroy();
+                this.downtimeMusic = null;
+            }
+        } catch(e) {}
     }
 
     updateWaveUI() {
@@ -606,6 +791,7 @@ class GameScene extends Phaser.Scene {
     }
 
     showEvolveScreen() {
+        this.inputLocked = true;
         document.getElementById('levelUpTitle').innerText = 'EVOLVE FOR ' + this.currentWave.title;
         document.getElementById('evolveDescription').innerText = this.currentWave.description;
 
@@ -663,6 +849,13 @@ function startGame() {
     }, 500);
 }
 
+function playFusionSound() {
+    try {
+        const scene = phaserGame && phaserGame.scene.scenes[0];
+        if (scene && scene.sound) scene.sound.play('fusion', { volume: 0.8 });
+    } catch(e) {}
+}
+
 function applyPowerUp(type) {
     const scene = phaserGame.scene.scenes[0];
 
@@ -683,6 +876,7 @@ function applyPowerUp(type) {
     }
 
     document.getElementById('levelUpScreen').classList.add('hidden');
+    scene.inputLocked = false;
     scene.updateWaveUI();
     // Reset positions and temporarily slow enemies so player can react
     if (scene.resetAfterUpgrade) scene.resetAfterUpgrade();
@@ -692,11 +886,161 @@ function applyPowerUp(type) {
     }
 }
 
-function closeRelicModal() {
+function acceptRelic() {
     const modal = document.getElementById('relic-modal');
+    const relic = modal._pendingRelic;
+    modal._pendingRelic = null;
     modal.classList.add('hidden');
-    
+
+    if (relic && pausedScene) {
+        const scene = pausedScene;
+
+        // Enforce normal relic cap (10)
+        if (scene.player.relics.length >= 10) {
+            pausedScene.scene.resume();
+            pausedScene = null;
+            return;
+        }
+
+        // Enforce per-relic maxStack (e.g. Fracture Lens caps at 2)
+        if (relic.maxStack) {
+            const currentCount = scene.player.relics.filter(r => r.id === relic.id).length;
+            if (currentCount >= relic.maxStack) {
+                // Already at cap — just resume without adding
+                pausedScene.inputLocked = false;
+                pausedScene.scene.resume();
+                pausedScene = null;
+                return;
+            }
+        }
+
+        // Apply effect and add to normal collection
+        scene.player.relics.push(relic);
+        relic.effect(scene.player, scene.currentWeapon, scene);
+        scene.updateRelicsDisplay();
+        updateHeartsDisplay(scene.player.hp, scene.player.maxHp);
+
+        // Check if this triggers a fusion
+        const recipe = checkFusionAvailable(scene.player.relics);
+        if (recipe) {
+            const fusedRelic = { ...recipe.result };
+            const currentFusedCount = scene.player.fusedRelics.filter(r => r.id === fusedRelic.id).length;
+            const maxStack = fusedRelic.maxStack || 2;
+
+            if (currentFusedCount < maxStack) {
+                // Hold resume — show fusion modal first
+                showFusionModal(recipe, scene);
+                return; // pausedScene stays set; fusion modal will resume
+            }
+        }
+    }
+
     if (pausedScene) {
+        pausedScene.inputLocked = false;
+        pausedScene.scene.resume();
+        pausedScene = null;
+    }
+}
+
+function declineRelic() {
+    const modal = document.getElementById('relic-modal');
+    modal._pendingRelic = null;
+    modal.classList.add('hidden');
+
+    if (pausedScene) {
+        pausedScene.inputLocked = false;
+        pausedScene.scene.resume();
+        pausedScene = null;
+    }
+}
+
+// Legacy alias
+function closeRelicModal() { acceptRelic(); }
+
+// ── Fusion Modal ──────────────────────────────────────────────
+/**
+ * Show the fusion offer modal. Game is already paused at this point
+ * (pausedScene is set). The player can accept or decline the fusion.
+ */
+function showFusionModal(recipe, scene) {
+    const fused = recipe.result;
+    const isAegis = fused.id === 'aegis_core';
+    const modal = document.getElementById('fusion-modal');
+    const content = modal.querySelector('.fusion-modal-content');
+
+    modal.classList.toggle('fusion-aegis', isAegis);
+    if (content) content.classList.toggle('fusion-aegis', isAegis);
+
+    document.getElementById('fusion-icon').innerText = fused.icon;
+    document.getElementById('fusion-title').innerText = '⚗️ FUSION AVAILABLE';
+    document.getElementById('fusion-ingredients').innerText =
+        recipe.requires
+            .map(id => {
+                const r = relicPool.find(x => x.id === id);
+                return r ? `${r.icon} ${r.name}` : id;
+            })
+            .join('  +  ');
+    document.getElementById('fusion-name').innerText = fused.name;
+    document.getElementById('fusion-description').innerText = fused.description;
+
+    // Store recipe on modal for accept/decline
+    document.getElementById('fusion-modal')._pendingRecipe = recipe;
+    document.getElementById('fusion-modal').classList.remove('hidden');
+    playFusionSound();
+}
+
+function acceptFusion() {
+    const modal = document.getElementById('fusion-modal');
+    const recipe = modal._pendingRecipe;
+    modal._pendingRecipe = null;
+    modal.classList.add('hidden');
+
+    // Grace-fusion mode: scene is already paused by advanceWave; don't resume it
+    if (_graceScene && _graceScene._graceFusionPending) {
+        _graceScene._graceFusionPending = false;
+        if (recipe) {
+            const fusedRelic = { ...recipe.result };
+            fusedRelic.effect(_graceScene.player, _graceScene.currentWeapon, _graceScene);
+            _graceScene.player.fusedRelics.push(fusedRelic);
+            _graceScene.updateRelicsDisplay();
+            updateHeartsDisplay(_graceScene.player.hp, _graceScene.player.maxHp);
+            // Hide the fusion button — used up
+            const btn = document.getElementById('grace-fusion-btn');
+            if (btn) { btn.classList.add('hidden'); btn._recipe = null; }
+        }
+        return;
+    }
+
+    // Normal mid-game pickup fusion
+    if (recipe && pausedScene) {
+        const scene = pausedScene;
+        const fusedRelic = { ...recipe.result };
+        fusedRelic.effect(scene.player, scene.currentWeapon, scene);
+        scene.player.fusedRelics.push(fusedRelic);
+        scene.updateRelicsDisplay();
+        updateHeartsDisplay(scene.player.hp, scene.player.maxHp);
+    }
+
+    if (pausedScene) {
+        pausedScene.inputLocked = false;
+        pausedScene.scene.resume();
+        pausedScene = null;
+    }
+}
+
+function declineFusion() {
+    const modal = document.getElementById('fusion-modal');
+    modal._pendingRecipe = null;
+    modal.classList.add('hidden');
+
+    // Grace-fusion mode: just close modal, leave scene paused
+    if (_graceScene && _graceScene._graceFusionPending) {
+        _graceScene._graceFusionPending = false;
+        return;
+    }
+
+    if (pausedScene) {
+        pausedScene.inputLocked = false;
         pausedScene.scene.resume();
         pausedScene = null;
     }
@@ -723,33 +1067,82 @@ function updateHeartsDisplay(currentHp, maxHp) {
 // ===== RELIC INVENTORY MODAL =====
 function openRelicInventory() {
     const scene = phaserGame && phaserGame.scene.scenes[0];
-    const relics = scene && scene.player ? scene.player.relics : [];
+    const relics = (scene && scene.player) ? scene.player.relics : [];
+    const fusedRelics = (scene && scene.player) ? scene.player.fusedRelics : [];
 
     const grid = document.getElementById('inventory-grid');
     grid.innerHTML = '';
 
-    if (!relics || relics.length === 0) {
+    const allRelics = [...relics, ...fusedRelics];
+
+    if (allRelics.length === 0) {
         grid.innerHTML = '<div class="inv-empty">No relics collected yet.<br>Defeat enemies to find them!</div>';
     } else {
-        relics.forEach(relic => {
-            const card = document.createElement('div');
-            card.className = 'inv-relic-card';
-            card.title = 'Click for more info';
-            const hex = '#' + (relic.color || relic.glowColor || 0x00ff99).toString(16).padStart(6, '0');
-            const glowCol = relic.glowColor || hex;
-            card.style.borderColor = glowCol;
-            card.style.boxShadow = `0 0 8px ${glowCol}44`;
-            card.innerHTML = `
-                <span class="inv-relic-icon">${relic.icon || '?'}</span>
-                <div class="inv-relic-name">${relic.name}</div>
-                <div class="inv-relic-desc">${relic.description}</div>
-            `;
-            card.addEventListener('click', () => openRelicDetailModal(relic));
-            grid.appendChild(card);
-        });
+        // Section header for normal relics
+        if (relics.length > 0) {
+            const header = document.createElement('div');
+            header.style.cssText = 'grid-column:1/-1;color:#aaa;font-size:13px;text-transform:uppercase;letter-spacing:1px;margin-bottom:2px;';
+            header.innerText = `Normal Relics (${relics.length}/10)`;
+            grid.appendChild(header);
+            relics.forEach(relic => grid.appendChild(makeRelicCard(relic, false)));
+        }
+
+        // Section header for fused relics
+        if (fusedRelics.length > 0) {
+            const header = document.createElement('div');
+            header.style.cssText = 'grid-column:1/-1;color:#ff6666;font-size:13px;text-transform:uppercase;letter-spacing:1px;margin:8px 0 2px;';
+            header.innerText = `⚗️ Fused Relics (${fusedRelics.length}/2)`;
+            grid.appendChild(header);
+            fusedRelics.forEach(relic => grid.appendChild(makeRelicCard(relic, true)));
+        }
     }
 
     document.getElementById('inventory-modal').classList.remove('hidden');
+}
+
+function makeRelicCard(relic, isFused) {
+    const card = document.createElement('div');
+    card.className = 'inv-relic-card' + (isFused ? ' inv-relic-fused' : '');
+    card.title = 'Click for more info';
+    const glowCol = relic.glowColor || '#ffffff';
+    card.style.borderColor = glowCol;
+    card.style.boxShadow = `0 0 ${isFused ? 14 : 8}px ${glowCol}${isFused ? '88' : '44'}`;
+    if (isFused) card.style.background = 'rgba(120,0,0,0.25)';
+    card.innerHTML = `
+        <span class="inv-relic-icon">${relic.icon || '?'}</span>
+        <div class="inv-relic-name">${relic.name}${isFused ? ' <span style="color:#ff6666;font-size:10px;">FUSED</span>' : ''}</div>
+        <div class="inv-relic-desc">${relic.description}</div>
+        <button class="inv-discard-btn" title="Discard relic" onclick="event.stopPropagation(); confirmDiscardRelic('${relic.id}', ${isFused})">🗑</button>
+    `;
+    card.addEventListener('click', () => openRelicDetailModal(relic));
+    return card;
+}
+
+let _pendingDiscard = null;
+function confirmDiscardRelic(relicId, isFused) {
+    _pendingDiscard = { relicId, isFused };
+    const scene = phaserGame && phaserGame.scene.scenes[0];
+    const pool = isFused
+        ? (scene && scene.player.fusedRelics) || []
+        : (scene && scene.player.relics) || [];
+    const relic = pool.find(r => r.id === relicId);
+    const name = relic ? relic.name : relicId;
+
+    document.getElementById('discard-relic-name').innerText = name;
+    document.getElementById('discard-modal').classList.remove('hidden');
+}
+
+function confirmDiscard() {
+    document.getElementById('discard-modal').classList.add('hidden');
+    if (_pendingDiscard) {
+        throwRelic(_pendingDiscard.relicId, _pendingDiscard.isFused);
+        _pendingDiscard = null;
+    }
+}
+
+function cancelDiscard() {
+    _pendingDiscard = null;
+    document.getElementById('discard-modal').classList.add('hidden');
 }
 
 function openRelicDetailModal(relic) {
@@ -777,6 +1170,25 @@ function closeInventoryOnBackdrop(e) {
     if (e.target === document.getElementById('inventory-modal')) closeInventoryModal();
 }
 
+// ===== THROW / DISCARD RELIC =====
+function throwRelic(relicId, isFused) {
+    const scene = phaserGame && phaserGame.scene.scenes[0];
+    if (!scene || !scene.player) return;
+
+    if (isFused) {
+        const idx = scene.player.fusedRelics.findIndex(r => r.id === relicId);
+        if (idx !== -1) scene.player.fusedRelics.splice(idx, 1);
+    } else {
+        const idx = scene.player.relics.findIndex(r => r.id === relicId);
+        if (idx !== -1) scene.player.relics.splice(idx, 1);
+    }
+
+    scene.updateRelicsDisplay();
+    updateHeartsDisplay(scene.player.hp, scene.player.maxHp);
+    // Refresh the inventory grid in place
+    openRelicInventory();
+}
+
 // ===== GRACE PERIOD =====
 let _graceTimer = null;
 let _graceScene = null;
@@ -785,6 +1197,7 @@ function showGracePeriod(scene) {
     _graceScene = scene;
     const prevWaveIndex = scene.waveIndex - 1;
     const nextWave = scene.currentWave;
+    
 
     // Populate stats
     document.getElementById('grace-wave-title').innerText = `WAVE ${prevWaveIndex + 1} COMPLETE`;
@@ -798,6 +1211,20 @@ function showGracePeriod(scene) {
         <div class="grace-stat"><span class="grace-stat-label">RELICS</span><span class="grace-stat-value">${player.relics.length}</span></div>
         <div class="grace-stat"><span class="grace-stat-label">SHIELDS</span><span class="grace-stat-value">${player.shieldCharges || 0}</span></div>
     `;
+
+    // Show fusion button if a recipe is available and not yet at stack cap
+    const fusionBtn = document.getElementById('grace-fusion-btn');
+    if (fusionBtn) {
+        const recipe = checkFusionAvailable(player.relics);
+        const canFuse = recipe && (player.fusedRelics.filter(r => r.id === recipe.result.id).length < (recipe.result.maxStack || 2));
+        if (canFuse) {
+            fusionBtn.classList.remove('hidden');
+            fusionBtn._recipe = recipe;
+        } else {
+            fusionBtn.classList.add('hidden');
+            fusionBtn._recipe = null;
+        }
+    }
 
     // Timer
     let timeLeft = 10;
@@ -829,6 +1256,125 @@ function showGracePeriod(scene) {
     _graceTimer = requestAnimationFrame(tick);
 }
 
+/**
+ * Called by the ⚗️ FUSE button on the grace screen.
+ * The scene is already paused — we just show the fusion modal.
+ * We set a special flag so acceptFusion/declineFusion know NOT
+ * to call scene.resume() (endGracePeriod will do that later).
+ */
+function offerGraceFusion() {
+    const btn = document.getElementById('grace-fusion-btn');
+    const recipe = btn && btn._recipe;
+    if (!recipe || !_graceScene) return;
+
+    // Mark that we're in grace-fusion mode
+    _graceScene._graceFusionPending = true;
+
+    const fused = recipe.result;
+    const isAegis = fused.id === 'aegis_core';
+    const modal = document.getElementById('fusion-modal');
+    const content = modal.querySelector('.fusion-modal-content');
+    modal.classList.toggle('fusion-aegis', isAegis);
+    if (content) content.classList.toggle('fusion-aegis', isAegis);
+
+    document.getElementById('fusion-icon').innerText = fused.icon;
+    document.getElementById('fusion-title').innerText = '⚗️ FUSION AVAILABLE';
+    document.getElementById('fusion-ingredients').innerText =
+        recipe.requires
+            .map(id => {
+                const r = relicPool.find(x => x.id === id);
+                return r ? `${r.icon} ${r.name}` : id;
+            })
+            .join('  +  ');
+    document.getElementById('fusion-name').innerText = fused.name;
+    document.getElementById('fusion-description').innerText = fused.description;
+    document.getElementById('fusion-modal')._pendingRecipe = recipe;
+    document.getElementById('fusion-modal').classList.remove('hidden');
+    playFusionSound();
+}
+
+// ===== DOWNSIDE CARD SYSTEM =====
+const DOWNSIDE_OPTIONS = [
+    {
+        id: 'lose_heart',
+        icon: '💔',
+        label: 'CORRUPTED BLOOD',
+        detail: 'Lose 1 maximum heart permanently.',
+        apply(scene) {
+            if (scene.player.maxHp > 1) {
+                scene.player.maxHp -= 1;
+                scene.player.hp = Math.min(scene.player.hp, scene.player.maxHp);
+                updateHeartsDisplay(scene.player.hp, scene.player.maxHp);
+            }
+        }
+    },
+    {
+        id: 'cooldown',
+        icon: '⏳',
+        label: 'NEURAL LAG',
+        detail: '+10% attack cooldown. Your reflexes degrade.',
+        apply(scene) {
+            scene.player.reloadModifier *= 1.10;
+        }
+    },
+    {
+        id: 'range_nerf',
+        icon: '📉',
+        label: 'SIGNAL DECAY',
+        detail: '-7% weapon range. Your reach shrinks.',
+        apply(scene) {
+            scene.currentWeapon.range *= 0.93;
+        }
+    }
+];
+
+let _downsideScene = null;
+
+function showDownsideScreen(scene) {
+    _downsideScene = scene;
+
+    const el = document.getElementById('downsideScreen');
+    const waveNum = scene.waveIndex; // wave just completed
+
+    document.getElementById('downside-wave-label').innerText = `AFTER WAVE ${waveNum} — SYSTEM CORRUPTION`;
+    document.getElementById('downside-subtitle').innerText = 'The system fights back. Choose your punishment.';
+
+    const container = document.getElementById('downside-cards');
+    container.innerHTML = '';
+
+    DOWNSIDE_OPTIONS.forEach(opt => {
+        const btn = document.createElement('button');
+        btn.className = 'downside-card';
+        btn.innerHTML = `
+            <span class="downside-icon">${opt.icon}</span>
+            <span class="downside-label">${opt.label}</span>
+            <span class="downside-detail">${opt.detail}</span>
+        `;
+        btn.addEventListener('click', () => applyDownside(opt.id));
+        container.appendChild(btn);
+    });
+
+    el.classList.remove('hidden');
+}
+
+function applyDownside(id) {
+    const scene = _downsideScene;
+    _downsideScene = null;
+
+    document.getElementById('downsideScreen').classList.add('hidden');
+
+    if (scene) {
+        const option = DOWNSIDE_OPTIONS.find(o => o.id === id);
+        if (option) option.apply(scene);
+        // Downside IS the wave transition — no buff screen follows. Just resume.
+        scene.inputLocked = false;
+        scene.updateWaveUI();
+        if (scene.resetAfterUpgrade) scene.resetAfterUpgrade();
+        scene.scene.resume();
+        if (scene.currentWave.bossWave) scene.startBossWave();
+    }
+}
+
 function endGracePeriod() {
     if (_graceTimer) { cancelAnimationFrame(_graceTimer); _graceTimer = null; }
     document.getElementById('graceScreen').classList.add('hidden');
@@ -837,6 +1383,16 @@ function endGracePeriod() {
     if (!_graceScene) return;
     const scene = _graceScene;
     _graceScene = null;
+
+    // Stop downtime music — combat is about to resume
+    if (scene.stopDowntimeMusic) scene.stopDowntimeMusic();
+
+    // Every 4th completed wave (waveIndex is already incremented), show a downside card
+    // waveIndex is 1-based at this point (wave 1 just finished = waveIndex 1 now = about to play wave 2)
+    if (scene.waveIndex > 0 && scene.waveIndex % 4 === 0) {
+        showDownsideScreen(scene);
+        return; // showDownsideScreen will call showEvolveScreen when done
+    }
 
     // Show evolve/power-up screen
     scene.showEvolveScreen();

@@ -4,8 +4,10 @@ body {
     background: #050505;
     overflow: hidden;
     color: #fff;
-    /* VT323 is perfect for that 20UTD retro-pixel look */
     font-family: 'VT323', 'Courier New', Courier, monospace;
+    /* Prevent text highlight flash when spam-clicking */
+    user-select: none;
+    -webkit-user-select: none;
 }
 
 /* Phaser Canvas Container */
@@ -15,6 +17,9 @@ body {
     position: absolute;
     top: 0;
     left: 0;
+    /* Belt-and-suspenders for Safari */
+    user-select: none;
+    -webkit-user-select: none;
 }
 
 /* UI Layer sits on top of Canvas */
@@ -503,4 +508,175 @@ button small {
     background: #fff;
     color: #000;
     box-shadow: 0 0 25px #fff;
+}
+
+#modal-decline-btn {
+    padding: 12px 40px;
+    font-size: 20px;
+    font-weight: bold;
+    cursor: pointer;
+    border-radius: 6px;
+    transition: all 0.3s ease;
+    background: transparent;
+}
+#modal-decline-btn:hover {
+    background: #ff4444;
+    color: #fff;
+    box-shadow: 0 0 20px rgba(255, 68, 68, 0.6);
+    transform: scale(1.1);
+}
+
+/* ===== FUSION MODAL ===== */
+.fusion-modal-content {
+    max-width: 480px !important;
+    width: 90vw;
+    border-color: #cc0000 !important;
+    box-shadow: 0 0 40px rgba(204, 0, 0, 0.45) !important;
+    background: rgba(15, 5, 5, 0.98) !important;
+}
+
+/* Aegis Core fusion override — blue theme */
+.fusion-modal-content.fusion-aegis {
+    border-color: #00ccff !important;
+    box-shadow: 0 0 40px rgba(0, 200, 255, 0.45) !important;
+    background: rgba(0, 10, 20, 0.98) !important;
+}
+.fusion-modal-content.fusion-aegis .modal-icon {
+    animation: aegisFusionPulse 1s ease-in-out infinite alternate !important;
+}
+@keyframes aegisFusionPulse {
+    from { filter: drop-shadow(0 0 8px #00ccff); transform: scale(1); }
+    to   { filter: drop-shadow(0 0 24px #0088ff); transform: scale(1.08); }
+}
+#fusion-modal.fusion-aegis #fusion-title  { color: #00ccff !important; text-shadow: 0 0 20px #00ccff !important; }
+#fusion-modal.fusion-aegis #fusion-name   { color: #44ddff !important; text-shadow: 0 0 12px #00ccff !important; }
+#fusion-modal.fusion-aegis #fusion-ingredients { color: #aaddff !important; }
+#fusion-modal.fusion-aegis button:first-of-type {
+    background: linear-gradient(135deg, #006688, #003344) !important;
+    border-color: #00ccff !important;
+    box-shadow: 0 0 20px rgba(0,200,255,0.5) !important;
+}
+
+.fusion-modal-content .modal-icon {
+    animation: fusionPulse 1s ease-in-out infinite alternate;
+}
+
+@keyframes fusionPulse {
+    from { filter: drop-shadow(0 0 8px #ff4444); transform: scale(1); }
+    to   { filter: drop-shadow(0 0 24px #ff0000); transform: scale(1.08); }
+}
+
+/* Fused relic card glow override in inventory */
+.inv-relic-fused {
+    position: relative;
+}
+.inv-relic-fused::after {
+    content: '';
+    position: absolute;
+    inset: -1px;
+    border-radius: 8px;
+    background: linear-gradient(135deg, rgba(204,0,0,0.15), rgba(120,0,0,0.1));
+    pointer-events: none;
+}
+
+/* ===== DOWNSIDE CARD SCREEN ===== */
+.downside-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    max-width: 700px;
+    width: 92vw;
+    text-align: center;
+}
+
+.downside-header-icon {
+    font-size: 64px;
+    margin-bottom: 10px;
+    animation: downsidePulse 1s ease-in-out infinite alternate;
+    filter: drop-shadow(0 0 14px #ff0033);
+}
+
+@keyframes downsidePulse {
+    from { transform: scale(1);   filter: drop-shadow(0 0 8px #ff0033); }
+    to   { transform: scale(1.1); filter: drop-shadow(0 0 24px #ff0033); }
+}
+
+.downside-cards {
+    display: flex;
+    gap: 18px;
+    justify-content: center;
+    flex-wrap: wrap;
+    width: 100%;
+}
+
+.downside-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    background: rgba(20, 0, 0, 0.85);
+    border: 2px solid #cc0000;
+    border-radius: 12px;
+    padding: 24px 20px;
+    width: 180px;
+    cursor: pointer;
+    transition: all 0.25s ease;
+    box-shadow: 0 0 12px rgba(200, 0, 0, 0.3);
+    font-family: inherit;
+    margin: 0;
+}
+
+.downside-card:hover {
+    background: rgba(80, 0, 0, 0.9);
+    border-color: #ff4444;
+    box-shadow: 0 0 28px rgba(255, 68, 68, 0.6);
+    transform: scale(1.07) translateY(-4px);
+    color: #fff;
+}
+
+.downside-icon {
+    font-size: 48px;
+    display: block;
+}
+
+.downside-label {
+    font-size: 20px;
+    color: #ff6666;
+    font-weight: bold;
+    letter-spacing: 1px;
+    display: block;
+}
+
+.downside-detail {
+    font-size: 13px;
+    color: #ffaaaa;
+    opacity: 0.85;
+    line-height: 1.4;
+    display: block;
+}
+@keyframes graceFusionPulse {
+    from { box-shadow: 0 0 4px rgba(255,68,68,0.4); color: #ff4444; }
+    to   { box-shadow: 0 0 18px rgba(255,68,68,0.85); color: #ff8888; }
+}
+
+/* ===== INVENTORY DISCARD BUTTON ===== */
+.inv-discard-btn {
+    display: block;
+    margin: 6px auto 0;
+    padding: 2px 10px;
+    font-size: 14px;
+    background: transparent;
+    border: 1px solid #cc2222;
+    color: #cc2222;
+    border-radius: 4px;
+    cursor: pointer;
+    font-family: inherit;
+    transition: all 0.2s;
+    pointer-events: all;
+}
+.inv-discard-btn:hover {
+    background: #cc2222;
+    color: #fff;
+    box-shadow: 0 0 8px rgba(200,30,30,0.6);
+    transform: scale(1.05);
 }

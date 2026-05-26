@@ -9,12 +9,7 @@ const waveTemplateBase = [
         enemySpeed: 120,
         spawnThreshold: 94,
         enemyColor: 0xff0033,
-        description: 'A fast, hungry swarm of corrupted packets.',
-        powerOptions: [
-            { id: 'heal', label: 'REPAIR (Full Heal)', detail: 'Restore maximum HP' },
-            { id: 'speed', label: 'ADRENALINE (-20% reload)', detail: 'Attack faster' },
-            { id: 'range', label: 'SHOCKWAVE (+range)', detail: 'Slash reaches farther' }
-        ]
+        description: 'A fast, hungry swarm of corrupted packets.'
     },
     {
         title: 'FIREWALL RUSH',
@@ -22,12 +17,7 @@ const waveTemplateBase = [
         enemySpeed: 160,
         spawnThreshold: 92,
         enemyColor: 0xff9933,
-        description: 'Stronger defenders close in with greater fury.',
-        powerOptions: [
-            { id: 'heal', label: 'REPAIR (Full Heal)', detail: 'Restore maximum HP' },
-            { id: 'speed', label: 'OVERCLOCK (-25% reload)', detail: 'Your strikes land quicker' },
-            { id: 'shield', label: 'PHASE SHIELD (+1 hit)', detail: 'Absorb the next hit' }
-        ]
+        description: 'Stronger defenders close in with greater fury.'
     },
     {
         title: 'VIRUS HIVE',
@@ -35,12 +25,7 @@ const waveTemplateBase = [
         enemySpeed: 180,
         spawnThreshold: 91,
         enemyColor: 0x33ccff,
-        description: 'The hive mutates. Evade and strike precisely.',
-        powerOptions: [
-            { id: 'speed', label: 'ADRENALINE (-30% reload)', detail: 'Attack even faster' },
-            { id: 'range', label: 'ARC LASER (+range)', detail: 'Widen your strike arc' },
-            { id: 'shield', label: 'RESONANCE SHIELD (+2 hits)', detail: 'Withstand more damage' }
-        ]
+        description: 'The hive mutates. Evade and strike precisely.'
     },
     {
         title: 'SYSTEM CORE',
@@ -48,14 +33,46 @@ const waveTemplateBase = [
         enemySpeed: 210,
         spawnThreshold: 90,
         enemyColor: 0xff00ff,
-        description: 'Final core defenders spawn relentlessly.',
-        powerOptions: [
-            { id: 'heal', label: 'REPAIR (Full Heal)', detail: 'Restore maximum HP' },
-            { id: 'speed', label: 'NANO-FLOW (-35% reload)', detail: 'Lightning-fast slashes' },
-            { id: 'range', label: 'DISRUPTOR (+range)', detail: 'Expand your attack reach' }
-        ]
+        description: 'Final core defenders spawn relentlessly.'
     }
 ];
+
+const powerOptionVariants = {
+    heal: [
+        { label: 'REPAIR (Full Heal)', detail: 'Restore maximum HP' }
+    ],
+    speed: [
+        { label: 'ADRENALINE (-20% reload)', detail: 'Attack faster' },
+        { label: 'OVERCLOCK (-25% reload)', detail: 'Your strikes land quicker' },
+        { label: 'ADRENALINE (-30% reload)', detail: 'Attack even faster' },
+        { label: 'NANO-FLOW (-35% reload)', detail: 'Lightning-fast slashes' }
+    ],
+    range: [
+        { label: 'SHOCKWAVE (+range)', detail: 'Slash reaches farther' },
+        { label: 'ARC LASER (+range)', detail: 'Widen your strike arc' },
+        { label: 'DISRUPTOR (+range)', detail: 'Expand your attack reach' }
+    ],
+    shield: [
+        { label: 'PHASE SHIELD (+1 hit)', detail: 'Absorb the next hit' },
+        { label: 'RESONANCE SHIELD (+2 hits)', detail: 'Withstand more damage' }
+    ]
+};
+
+function getRandomPowerOptions(index) {
+    const ids = Object.keys(powerOptionVariants);
+    const chosen = [];
+
+    while (chosen.length < 3) {
+        const pick = ids[Math.floor(Math.random() * ids.length)];
+        if (!chosen.includes(pick)) chosen.push(pick);
+    }
+
+    return chosen.map((id) => {
+        const variants = powerOptionVariants[id];
+        const variant = variants[index % variants.length];
+        return { id, label: variant.label, detail: variant.detail };
+    });
+}
 
 function createWaveConfig(index) {
     const template = waveTemplateBase[index % waveTemplateBase.length];
@@ -80,7 +97,7 @@ function createWaveConfig(index) {
         enemyColor: template.enemyColor,
         enemyTypes: mixedWave ? [0xff0033, 0xff9933, 0x33ccff, 0xff00ff] : [template.enemyColor],
         description: template.description,
-        powerOptions: template.powerOptions,
+        powerOptions: getRandomPowerOptions(index),
         bossWave: false
     };
 }
@@ -98,11 +115,7 @@ function generateWaveConfigs() {
         enemyColor: 0xff0000,
         enemyTypes: [0xff0000],
         description: 'The system core has awakened. Dodge its projectiles and defeat the boss.',
-        powerOptions: [
-            { id: 'heal', label: 'REPAIR (Full Heal)', detail: 'Restore maximum HP' },
-            { id: 'speed', label: 'ADRENALINE (-20% reload)', detail: 'Attack faster' },
-            { id: 'range', label: 'SHOCKWAVE (+range)', detail: 'Slash reaches farther' }
-        ],
+        powerOptions: getRandomPowerOptions(24),
         bossWave: true,
         bossMaxHp: 70,
         bossColor: 0xff0000

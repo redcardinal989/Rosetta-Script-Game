@@ -131,13 +131,38 @@ class GameScene extends Phaser.Scene {
     }
 
     preload() {
-        // Placeholder sounds - replace with your actual files
+        // Add error handling for asset loading
+        this.load.on('loaderror', (file) => {
+            console.error(`Failed to load ${file.type}: ${file.key} from ${file.url}`);
+        });
+
         this.load.audio('sword', 'https://labs.phaser.io/assets/audio/SoundEffects/squit.wav');
-        this.load.audio('hit', 'hit.mp3');  // place hit.mp3 alongside index.html
-        this.load.image('arena1', './assets/backgrounds/arena1.png');
-        this.load.audio('downtime', 'downtime.mp3'); // place downtime.mp3 alongside index.html
-        this.load.audio('fusion', 'fusion.mp3');     // fusion sting
-        this.load.audio('freeze', 'freeze.mp3');     // secret relic activation
+        this.load.audio('hit', 'hit.mp3');
+        this.load.image('arena1', 'arena1.png');
+        this.load.audio('downtime', 'downtime.mp3');
+        this.load.audio('fusion', 'fusion.mp3');
+        this.load.audio('freeze', 'freeze.mp3');
+
+        // ── Swordsman spritesheets ─────────────────────────────────────────────
+        // All sheets: 64x64px frames, 4 rows = down / left / right / up
+        // Sheet widths and frame counts per row:
+        //   sw_idle:        768x256  12 cols  → frames 0-11 (down), 12-23 (left), 24-35 (right), 36-47 (up)
+        //   sw_walk:        384x256   6 cols  → frames 0-5  (down), 6-11  (left), 12-17 (right), 18-23 (up)
+        //   sw_run:         512x256   8 cols  → frames 0-7  (down), 8-15  (left), 16-23 (right), 24-31 (up)
+        //   sw_attack:      512x256   8 cols  → frames 0-7  (down), 8-15  (left), 16-23 (right), 24-31 (up)
+        //   sw_hurt:        320x256   5 cols  → frames 0-4  (down), 5-9   (left), 10-14 (right), 15-19 (up)
+        //   sw_death:       448x256   7 cols  → frames 0-6  (down) — same anim all dirs, play once
+        this.load.spritesheet('sw_idle',   'Swordsman_lvl1_Idle_with_shadow.png',   { frameWidth: 64, frameHeight: 64 });
+        this.load.spritesheet('sw_walk',   'Swordsman_lvl1_Walk_with_shadow.png',   { frameWidth: 64, frameHeight: 64 });
+        this.load.spritesheet('sw_run',    'Swordsman_lvl1_Run_with_shadow.png',    { frameWidth: 64, frameHeight: 64 });
+        this.load.spritesheet('sw_attack', 'Swordsman_lvl1_attack_with_shadow.png', { frameWidth: 64, frameHeight: 64 });
+        this.load.spritesheet('sw_hurt',   'Swordsman_lvl1_Hurt_with_shadow.png',   { frameWidth: 64, frameHeight: 64 });
+        this.load.spritesheet('sw_death',  'Swordsman_lvl1_Death_with_shadow.png',  { frameWidth: 64, frameHeight: 64 });
+        
+        // Log when assets are fully loaded
+        this.load.on('complete', () => {
+            console.log('All assets loaded successfully');
+        });
     }
 
     create() {
@@ -150,11 +175,59 @@ class GameScene extends Phaser.Scene {
     this.arenaBg.setDepth(-10);
 
         
-        // 1. Player Setup (The Green Dot)
-        this.player = this.add.circle(width / 2, height / 2, 10, 0x00ff00);
-        this.player.setStrokeStyle(2, 0xffffff);
-        this.physics.add.existing(this.player);
+        // ── Register directional animations from multi-row spritesheets ─────────
+        // Helper: build a frame list for one row of a sheet with `cols` columns.
+        const rowFrames = (cols, row) =>
+            Array.from({ length: cols }, (_, i) => ({ key: 'sw_' + rowFrames._sheet, frame: row * cols + i }));
+        // We pass sheet key via a tiny helper closure instead:
+        const makeFrames = (sheet, cols, row) =>
+            Array.from({ length: cols }, (_, i) => ({ key: sheet, frame: row * cols + i }));
+        
+
+        // Row mapping: 0=down, 1=left, 2=right, 3=up
+        const animDefs = [
+            // Idle (12 frames per row)
+            { key: 'sw_idle_down',  frames: makeFrames('sw_idle',   12, 0), fps: 8 },
+            { key: 'sw_idle_left',  frames: makeFrames('sw_idle',   12, 1), fps: 8 },
+            { key: 'sw_idle_right', frames: makeFrames('sw_idle',   12, 2), fps: 8 },
+            { key: 'sw_idle_up',    frames: makeFrames('sw_idle',   12, 3), fps: 8 },
+            // Walk (6 frames per row)
+            { key: 'sw_walk_down',  frames: makeFrames('sw_walk',    6, 0), fps: 8 },
+            { key: 'sw_walk_left',  frames: makeFrames('sw_walk',    6, 1), fps: 8 },
+            { key: 'sw_walk_right', frames: makeFrames('sw_walk',    6, 2), fps: 8 },
+            { key: 'sw_walk_up',    frames: makeFrames('sw_walk',    6, 3), fps: 8 },
+            // Run (8 frames per row)
+            { key: 'sw_run_down',   frames: makeFrames('sw_run',     8, 0), fps: 10 },
+            { key: 'sw_run_left',   frames: makeFrames('sw_run',     8, 1), fps: 10 },
+            { key: 'sw_run_right',  frames: makeFrames('sw_run',     8, 2), fps: 10 },
+            { key: 'sw_run_up',     frames: makeFrames('sw_run',     8, 3), fps: 10 },
+            // Hurt (5 frames per row, play once)
+            { key: 'sw_hurt_down',  frames: makeFrames('sw_hurt',    5, 0), fps: 10, repeat: 0 },
+            { key: 'sw_hurt_left',  frames: makeFrames('sw_hurt',    5, 1), fps: 10, repeat: 0 },
+            { key: 'sw_hurt_right', frames: makeFrames('sw_hurt',    5, 2), fps: 10, repeat: 0 },
+            { key: 'sw_hurt_up',    frames: makeFrames('sw_hurt',    5, 3), fps: 10, repeat: 0 },
+            // Death (7 frames, use row 0, play once)
+            { key: 'sw_death',      frames: makeFrames('sw_death',   7, 0), fps: 8,  repeat: 0 },
+        ];
+        animDefs.forEach(({ key, frames, fps, repeat }) => {
+            if (!this.anims.exists(key)) {
+                this.anims.create({ key, frames, frameRate: fps, repeat: repeat ?? -1 });
+            }
+        });
+
+        // Track last facing direction so idle uses the right row
+        this._facing = 'down';
+
+        // 1. Player Setup
+        // All frames are 64x64px. setScale(2) → rendered at 128x128px on screen.
+        this.player = this.physics.add.sprite(width / 2, height / 2, 'sw_idle');
+        this.player.setScale(2);
+        this.player.setDepth(2);
+        this.player.play('sw_idle_down');
         this.player.body.setCollideWorldBounds(true);
+        // Physics body: 20x28px hitbox at feet, centred horizontally in the 64px frame
+        this.player.body.setSize(20, 28);
+        this.player.body.setOffset(22, 32);
         
         // Player Stats
         this.player.hp = 5;
@@ -176,14 +249,14 @@ class GameScene extends Phaser.Scene {
         // Initialize heart display
         setTimeout(() => updateHeartsDisplay(this.player.hp, this.player.maxHp), 100);
 
-        // Player indicator — subtle pulsing ring so the player never loses themselves
-        this._playerRing = this.add.circle(width / 2, height / 2, 18, 0x00ff00, 0);
-        this._playerRing.setStrokeStyle(1, 0x00ff88, 0.45);
+        // Player indicator — subtle shadow ring under the sprite
+        this._playerRing = this.add.circle(width / 2, height / 2, 14, 0x00ff00, 0);
+        this._playerRing.setStrokeStyle(1, 0x00ff88, 0.35);
         this._playerRing.setDepth(1);
         this.tweens.add({
             targets: this._playerRing,
-            scaleX: 1.35, scaleY: 1.35,
-            alpha: { from: 0.55, to: 0.12 },
+            scaleX: 1.3, scaleY: 1.3,
+            alpha: { from: 0.4, to: 0.08 },
             duration: 900,
             yoyo: true,
             loop: -1,
@@ -256,11 +329,39 @@ class GameScene extends Phaser.Scene {
         const speed = 200 * (this.player.moveSpeedMultiplier || 1);
         this.player.body.setVelocity(0);
 
+        const movingLeft  = this.keys.A.isDown || this.cursors.left.isDown;
+        const movingRight = this.keys.D.isDown || this.cursors.right.isDown;
+        const movingUp    = this.keys.W.isDown || this.cursors.up.isDown;
+        const movingDown  = this.keys.S.isDown || this.cursors.down.isDown;
+        const isMoving    = movingLeft || movingRight || movingUp || movingDown;
+
         if (!this.player._frozen) {
-            if (this.keys.A.isDown || this.cursors.left.isDown) this.player.body.setVelocityX(-speed);
-            if (this.keys.D.isDown || this.cursors.right.isDown) this.player.body.setVelocityX(speed);
-            if (this.keys.W.isDown || this.cursors.up.isDown) this.player.body.setVelocityY(-speed);
-            if (this.keys.S.isDown || this.cursors.down.isDown) this.player.body.setVelocityY(speed);
+            if (movingLeft)  this.player.body.setVelocityX(-speed);
+            if (movingRight) this.player.body.setVelocityX(speed);
+            if (movingUp)    this.player.body.setVelocityY(-speed);
+            if (movingDown)  this.player.body.setVelocityY(speed);
+        }
+
+        // ── Directional animation ─────────────────────────────────────────────
+        if (this.player.anims && !this.player._playingHurt) {
+            // Update facing direction from movement
+            if (movingLeft)       this._facing = 'left';
+            else if (movingRight) this._facing = 'right';
+            else if (movingUp)    this._facing = 'up';
+            else if (movingDown)  this._facing = 'down';
+
+            const dir = this._facing || 'down';
+
+            let targetAnim;
+            if (!isMoving || this.player._frozen) {
+                targetAnim = `sw_idle_${dir}`;
+            } else {
+                targetAnim = `sw_walk_${dir}`;
+            }
+
+            if (this.player.anims.currentAnim?.key !== targetAnim) {
+                this.player.play(targetAnim, true);
+            }
         }
 
         // Keep aegis ring centered on player
@@ -280,12 +381,27 @@ class GameScene extends Phaser.Scene {
             this.spawnEnemy();
         }
 
+        // Thaw player if freeze duration elapsed (timestamp — survives scene pause)
+        if (this.player._frozen && this.player._frozenUntil && Date.now() >= this.player._frozenUntil) {
+            this.player._frozen = false;
+            this.player._frozenUntil = 0;
+            this.player.clearTint();
+        }
+
         // Enemy AI: Follow Player (respect temporary modifier; skip frozen enemies)
         this.enemies.getChildren().forEach(enemy => {
             // Track brute HP label position
             if (enemy._isBrute && enemy._hpLabel && enemy._hpLabel.active) {
                 enemy._hpLabel.x = enemy.x;
                 enemy._hpLabel.y = enemy.y - 34;
+            }
+            // Thaw enemy if freeze duration elapsed (timestamp — survives scene pause)
+            if (enemy._frozen && enemy._frozenUntil && Date.now() >= enemy._frozenUntil) {
+                enemy._frozen = false;
+                enemy._frozenUntil = 0;
+                if (enemy.setFillStyle && enemy._origColor !== undefined) {
+                    enemy.setFillStyle(enemy._origColor);
+                }
             }
             if (enemy._frozen) {
                 if (enemy.body) enemy.body.setVelocity(0);
@@ -754,7 +870,7 @@ class GameScene extends Phaser.Scene {
 
         // ── 35% chance to FREEZE the player if close enough ──────
         const playerDist = Phaser.Math.Distance.Between(x, y, this.player.x, this.player.y);
-        if (playerDist < SHARD_RADIUS && Math.random() < 0.35) {
+        if (playerDist < SHARD_RADIUS && Math.random() < 0.25) {
             this._freezePlayer();
         }
     }
@@ -763,24 +879,17 @@ class GameScene extends Phaser.Scene {
     _freezePlayer() {
         if (this.player._frozen || this.player.invulnerable) return;
         this.player._frozen = true;
+        this.player._frozenUntil = Date.now() + 1200;
 
-        const prevColor = 0x00ff00;
-        this.player.setFillStyle(0x88eeff);
+        // Sprite uses tint, not setFillStyle
+        this.player.setTint(0x88eeff);
 
-        const { width, height } = this.scale;
         const txt = this.add.text(this.player.x, this.player.y - 28, '❄ FROZEN!',
             { fontFamily: 'VT323', fontSize: '20px', color: '#88eeff',
               stroke: '#000', strokeThickness: 3 });
         txt.setOrigin(0.5).setDepth(10);
         this.tweens.add({ targets: txt, alpha: 0, y: txt.y - 22,
             duration: 900, onComplete: () => txt.destroy() });
-
-        this.time.delayedCall(1200, () => {
-            if (this.player) {
-                this.player._frozen = false;
-                this.player.setFillStyle(prevColor);
-            }
-        });
     }
 
     // ── BRUTE ENEMY ──────────────────────────────────────────────
@@ -1089,15 +1198,12 @@ class GameScene extends Phaser.Scene {
         const freezeDuration = stacks * 1000; // 1s per stack, up to 3s
 
         enemy._frozen = true;
+        // Timestamp-based thaw — survives scene pause (delayedCall does not)
+        enemy._frozenUntil = Date.now() + freezeDuration;
 
         // Visual: turn enemy icy blue and stop movement
-        const origColor = enemy.fillColor;
         if (enemy.setFillStyle) enemy.setFillStyle(0x88eeff);
-        if (enemy.body) {
-            enemy.body.setVelocity(0);
-            // Store velocity override so moveToObject is blocked in update
-            enemy._frozenUntil = Date.now() + freezeDuration;
-        }
+        if (enemy.body) enemy.body.setVelocity(0);
 
         // Ice particle burst
         for (let i = 0; i < 5; i++) {
@@ -1113,15 +1219,7 @@ class GameScene extends Phaser.Scene {
                 onComplete: () => shard.destroy()
             });
         }
-
-        // Thaw after freeze duration
-        this.time.delayedCall(freezeDuration, () => {
-            if (enemy && enemy.active) {
-                enemy._frozen = false;
-                enemy._frozenUntil = 0;
-                if (enemy.setFillStyle) enemy.setFillStyle(origColor);
-            }
-        });
+        // Thaw is handled by the update() loop via _frozenUntil timestamp
     }
 
     applyDotToEnemy(enemy) {
@@ -1631,9 +1729,15 @@ class GameScene extends Phaser.Scene {
         // Update heart display
         updateHeartsDisplay(this.player.hp, this.player.maxHp);
 
-        // Red Flash Effect
+        // Red Flash + Hurt animation
+        const hurtAnim = `sw_hurt_${this._facing || 'down'}`;
+        this.player._playingHurt = true;
+        this.player.play(hurtAnim, true);
+        this.player.once('animationcomplete', () => {
+            this.player._playingHurt = false;
+        });
         this.tweens.add({
-            targets: this.player, alpha: 0.2, duration: 100, yoyo: true, repeat: 3,
+            targets: this.player, alpha: 0.3, duration: 80, yoyo: true, repeat: 2,
             onComplete: () => { this.player.invulnerable = false; this.player.alpha = 1; }
         });
 

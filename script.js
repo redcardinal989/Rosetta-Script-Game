@@ -80,11 +80,14 @@ function createWaveConfig(index) {
     const mixedWave = ((index + 1) % 5 === 0);
 
     // After wave 5 enemies gain HP so we give the player breathing room:
-    // speed is reduced by 18% and spawn rate is 30% slower (higher threshold = less frequent)
+    // speed grows only 7% per phase (was 12%), hard-capped at 1.6x base, and
+    // post-HP-scaling waves get an extra 20% reduction (was 18%) to stay fair.
     const postScalingWave = index >= 5;
+    const rawMultiplier = 1 + phase * 0.07; // gentler ramp-up
+    const cappedMultiplier = Math.min(rawMultiplier, 1.60);  // never more than 60% faster than base
     const speedMultiplier = postScalingWave
-        ? (1 + phase * 0.12) * 0.82   // 18% slower than it would otherwise be
-        : (1 + phase * 0.12);
+        ? cappedMultiplier * 0.80   // 20% slower after HP scaling kicks in
+        : cappedMultiplier;
     const spawnThreshold = postScalingWave
         ? Math.min(96, Math.max(86, template.spawnThreshold - phase * 2 - (index % 4) + 4))  // harder to spawn
         : Math.max(82, template.spawnThreshold - phase * 2 - (index % 4));
@@ -208,6 +211,11 @@ class GameScene extends Phaser.Scene {
             { key: 'sw_hurt_up',    frames: makeFrames('sw_hurt',    5, 3), fps: 10, repeat: 0 },
             // Death (7 frames, use row 0, play once)
             { key: 'sw_death',      frames: makeFrames('sw_death',   7, 0), fps: 8,  repeat: 0 },
+            // Attack (8 frames per row, play once then return to idle/walk)
+            { key: 'sw_attack_down',  frames: makeFrames('sw_attack',  8, 0), fps: 16, repeat: 0 },
+            { key: 'sw_attack_left',  frames: makeFrames('sw_attack',  8, 1), fps: 16, repeat: 0 },
+            { key: 'sw_attack_right', frames: makeFrames('sw_attack',  8, 2), fps: 16, repeat: 0 },
+            { key: 'sw_attack_up',    frames: makeFrames('sw_attack',  8, 3), fps: 16, repeat: 0 },
         ];
         animDefs.forEach(({ key, frames, fps, repeat }) => {
             if (!this.anims.exists(key)) {
@@ -343,7 +351,7 @@ class GameScene extends Phaser.Scene {
         }
 
         // ── Directional animation ─────────────────────────────────────────────
-        if (this.player.anims && !this.player._playingHurt) {
+        if (this.player.anims && !this.player._playingHurt && !this.player._playingAttack) {
             // Update facing direction from movement
             if (movingLeft)       this._facing = 'left';
             else if (movingRight) this._facing = 'right';
@@ -438,7 +446,21 @@ class GameScene extends Phaser.Scene {
         // Sound effect
         this.sound.play('sword', { volume: 0.5 });
 
+        // Update facing toward click before playing attack anim
         const angle = Phaser.Math.Angle.Between(this.player.x, this.player.y, pointer.worldX, pointer.worldY);
+        const deg = Phaser.Math.RadToDeg(angle);
+        if (deg > -45 && deg <= 45)        this._facing = 'right';
+        else if (deg > 45 && deg <= 135)   this._facing = 'down';
+        else if (deg > 135 || deg <= -135) this._facing = 'left';
+        else                               this._facing = 'up';
+
+        // Play directional attack animation (play once, then resume movement anim)
+        const attackAnim = `sw_attack_${this._facing}`;
+        this.player._playingAttack = true;
+        this.player.play(attackAnim, true);
+        this.player.once('animationcomplete', () => {
+            this.player._playingAttack = false;
+        });
         
         // Slash Visual — blue/purple arc with particle burst
         const arc = this.add.graphics();
@@ -2016,6 +2038,8 @@ function applyPowerUp(type) {
     // Reset positions and temporarily slow enemies so player can react
     if (scene.resetAfterUpgrade) scene.resetAfterUpgrade();
     scene.scene.resume();
+    // Clear any stuck keyboard state from keys held during the popup
+    if (scene.input && scene.input.keyboard) scene.input.keyboard.resetKeys();
     if (scene.currentWave.bossWave) {
         scene.startBossWave();
     }
@@ -2062,6 +2086,7 @@ function acceptRelic() {
     if (pausedScene) {
         pausedScene.inputLocked = false;
         pausedScene.scene.resume();
+        if (pausedScene.input && pausedScene.input.keyboard) pausedScene.input.keyboard.resetKeys();
         pausedScene = null;
     }
 }
@@ -2074,6 +2099,7 @@ function declineRelic() {
     if (pausedScene) {
         pausedScene.inputLocked = false;
         pausedScene.scene.resume();
+        if (pausedScene.input && pausedScene.input.keyboard) pausedScene.input.keyboard.resetKeys();
         pausedScene = null;
     }
 }

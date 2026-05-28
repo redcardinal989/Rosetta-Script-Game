@@ -336,7 +336,13 @@ class GameScene extends Phaser.Scene {
         // Movement Logic
         const speed = 200 * (this.player.moveSpeedMultiplier || 1);
         this.player.body.setVelocity(0);
+        let spd = speed;
+if (enemy._cryoBurst) spd = speed * 1.2;
 
+// CHANGE THIS LINE: Make Brutes much faster!
+if (enemy._isBrute)   spd = Math.min(speed * 0.85, 180); // Increased from speed * 0.32 and 68 cap!
+
+this.physics.moveToObject(enemy, this.player, spd);
         const movingLeft  = this.keys.A.isDown || this.cursors.left.isDown;
         const movingRight = this.keys.D.isDown || this.cursors.right.isDown;
         const movingUp    = this.keys.W.isDown || this.cursors.up.isDown;

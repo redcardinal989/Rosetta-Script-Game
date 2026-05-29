@@ -2,6 +2,67 @@ let phaserGame;
 let score = 0;
 let pausedScene = null; // Track paused scene for relic modal
 
+// Global key state so WASD/arrow input is tracked even when the Phaser
+// scene is paused or an HTML overlay has focus.
+window._globalKeyState = window._globalKeyState || {
+    W: false, A: false, S: false, D: false,
+    ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false
+};
+
+// Register window-level key listeners once
+if (!window._globalKeyState._listenersAdded) {
+    window.addEventListener('keydown', (e) => {
+        const k = e.key;
+        if (k in window._globalKeyState) window._globalKeyState[k] = true;
+    }, { passive: true });
+    window.addEventListener('keyup', (e) => {
+        const k = e.key;
+        if (k in window._globalKeyState) window._globalKeyState[k] = false;
+    }, { passive: true });
+    window._globalKeyState._listenersAdded = true;
+}
+
+// External movement loop: when the Phaser scene is paused or inputLocked
+// (modals/overlays), move the player directly based on the global key state.
+// This runs every animation frame and uses the scene's speed scaling.
+(function externalMovementLoop() {
+    let lastTs = performance.now();
+    function frame(ts) {
+        const dt = Math.min(50, ts - lastTs); // cap delta to avoid large jumps
+        lastTs = ts;
+        try {
+            const scene = phaserGame && phaserGame.scene && phaserGame.scene.scenes[0];
+            if (scene && scene.player) {
+                const isPaused = scene.scene.isPaused();
+                if (isPaused || scene.inputLocked) {
+                    const gs = window._globalKeyState;
+                    let vx = 0, vy = 0;
+                    if (gs.W || gs.ArrowUp) vy -= 1;
+                    if (gs.S || gs.ArrowDown) vy += 1;
+                    if (gs.A || gs.ArrowLeft) vx -= 1;
+                    if (gs.D || gs.ArrowRight) vx += 1;
+                    if (vx !== 0 || vy !== 0) {
+                        const speed = 200 * (scene.player.moveSpeedMultiplier || 1);
+                        const len = Math.hypot(vx, vy) || 1;
+                        const move = speed * (dt / 1000);
+                        scene.player.x += (vx / len) * move;
+                        scene.player.y += (vy / len) * move;
+                        // Keep physics body in sync if present
+                        if (scene.player.body && typeof scene.player.body.reset === 'function') {
+                            try { scene.player.body.reset(scene.player.x, scene.player.y); } catch (e) { }
+                        }
+                    }
+                }
+            }
+        } catch (e) {
+            // swallow any errors to avoid stopping the loop
+            console.error('externalMovementLoop error', e);
+        }
+        requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+})();
+
 const waveTemplateBase = [
     {
         title: 'DATA SWARM',
@@ -336,10 +397,11 @@ class GameScene extends Phaser.Scene {
         // Movement Logic
         const speed = 200 * (this.player.moveSpeedMultiplier || 1);
         this.player.body.setVelocity(0);
-        const movingLeft  = this.keys.A.isDown || this.cursors.left.isDown;
-        const movingRight = this.keys.D.isDown || this.cursors.right.isDown;
-        const movingUp    = this.keys.W.isDown || this.cursors.up.isDown;
-        const movingDown  = this.keys.S.isDown || this.cursors.down.isDown;
+        const gks = window._globalKeyState || {};
+        const movingLeft  = (gks.A || gks.ArrowLeft) || (this.keys && this.keys.A && this.keys.A.isDown) || this.cursors.left.isDown;
+        const movingRight = (gks.D || gks.ArrowRight) || (this.keys && this.keys.D && this.keys.D.isDown) || this.cursors.right.isDown;
+        const movingUp    = (gks.W || gks.ArrowUp) || (this.keys && this.keys.W && this.keys.W.isDown) || this.cursors.up.isDown;
+        const movingDown  = (gks.S || gks.ArrowDown) || (this.keys && this.keys.S && this.keys.S.isDown) || this.cursors.down.isDown;
         const isMoving    = movingLeft || movingRight || movingUp || movingDown;
 
         if (!this.player._frozen) {

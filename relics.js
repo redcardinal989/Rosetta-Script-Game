@@ -159,6 +159,44 @@ const fusionRecipes = [
             }
         }
     }
+    ,
+    {
+        requires: ['swift_boots', 'fracture_lens'],
+        result: {
+            id: 'phase_stride',
+            name: 'Phase Stride',
+            icon: '💨',
+            description: 'Combines haste and precision. Grants +12% movement speed and leaves a damaging afterimage when moving. Max 2 stacks.',
+            color: 0xffa500,
+            glowColor: '#ffb366',
+            isFused: true,
+            maxStack: 2,
+            effect(player, weapon, scene) {
+                player.moveSpeedMultiplier = (player.moveSpeedMultiplier || 1) * 1.12;
+                player.phaseStride = true;
+                player.phaseStrideStacks = (player.phaseStrideStacks || 0) + 1;
+            }
+        }
+    },
+    {
+        requires: ['cryo_shard', 'plasma_extender'],
+        result: {
+            id: 'glacial_arc',
+            name: 'Glacial Arc',
+            icon: '❄️',
+            description: 'Freezing energy empowers your reach: melee range +15 and attacks can briefly freeze enemies. Max 2 stacks.',
+            color: 0x88ccff,
+            glowColor: '#88ddff',
+            isFused: true,
+            maxStack: 2,
+            effect(player, weapon, scene) {
+                weapon.range = (weapon.range || 150) + 15;
+                player.attackFreezes = true;
+                player.attackFreezeDuration = Math.max(player.attackFreezeDuration || 0, 600);
+                player.glacialStacks = (player.glacialStacks || 0) + 1;
+            }
+        }
+    }
 ];
 
 // ── Secret relic definition ───────────────────────────────────

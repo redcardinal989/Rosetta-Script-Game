@@ -336,13 +336,6 @@ class GameScene extends Phaser.Scene {
         // Movement Logic
         const speed = 200 * (this.player.moveSpeedMultiplier || 1);
         this.player.body.setVelocity(0);
-        let spd = speed;
-if (enemy._cryoBurst) spd = speed * 1.2;
-
-// CHANGE THIS LINE: Make Brutes much faster!
-if (enemy._isBrute)   spd = Math.min(speed * 0.85, 180); // Increased from speed * 0.32 and 68 cap!
-
-this.physics.moveToObject(enemy, this.player, spd);
         const movingLeft  = this.keys.A.isDown || this.cursors.left.isDown;
         const movingRight = this.keys.D.isDown || this.cursors.right.isDown;
         const movingUp    = this.keys.W.isDown || this.cursors.up.isDown;
@@ -436,10 +429,10 @@ this.physics.moveToObject(enemy, this.player, spd);
             if (enemy._cryoBurst) enemy._shatterChecked = false;
 
             const speed = this.currentWave.enemySpeed * (this.enemySpeedModifier || 1);
-            // Cryo burst enemies move slightly faster; Brutes are very slow
+            // Cryo burst enemies move slightly faster; Brutes are slow but threatening
             let spd = speed;
             if (enemy._cryoBurst) spd = speed * 1.2;
-            if (enemy._isBrute)   spd = Math.min(speed * 0.32, 68); // capped slow
+            if (enemy._isBrute)   spd = Math.min(speed * 0.85, 180); // menacing but readable
             this.physics.moveToObject(enemy, this.player, spd);
         });
     }
@@ -464,8 +457,13 @@ this.physics.moveToObject(enemy, this.player, spd);
         const attackAnim = `sw_attack_${this._facing}`;
         this.player._playingAttack = true;
         this.player.play(attackAnim, true);
-        this.player.once('animationcomplete', () => {
-            this.player._playingAttack = false;
+        // Tag the key so we only clear the flag for THIS anim completing
+        this.player._attackAnimKey = attackAnim;
+        this.player.once('animationcomplete', (anim) => {
+            if (anim.key === this.player._attackAnimKey) {
+                this.player._playingAttack = false;
+                this.player._attackAnimKey = null;
+            }
         });
         
         // Slash Visual — blue/purple arc with particle burst
@@ -1759,15 +1757,25 @@ this.physics.moveToObject(enemy, this.player, spd);
 
         // Red Flash + Hurt animation
         const hurtAnim = `sw_hurt_${this._facing || 'down'}`;
+        // If an attack was mid-swing, cancel it cleanly first
+        this.player._playingAttack = false;
+        this.player._attackAnimKey = null;
         this.player._playingHurt = true;
         this.player.play(hurtAnim, true);
         this.player.once('animationcomplete', () => {
             this.player._playingHurt = false;
         });
+        // Blink for 1200ms — proper grace window after a hit
         this.tweens.add({
-            targets: this.player, alpha: 0.3, duration: 80, yoyo: true, repeat: 2,
-            onComplete: () => { this.player.invulnerable = false; this.player.alpha = 1; }
+            targets: this.player,
+            alpha: 0.3,
+            duration: 100,
+            yoyo: true,
+            repeat: 5,
+            onComplete: () => { this.player.alpha = 1; }
         });
+        // Invulnerability lasts the full 1200ms regardless of blink timing
+        this.time.delayedCall(1200, () => { this.player.invulnerable = false; });
 
         if (this.player.hp <= 0) {
             alert("DEFEATED. KILLS: " + score);

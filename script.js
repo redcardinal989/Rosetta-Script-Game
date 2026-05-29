@@ -429,10 +429,10 @@ class GameScene extends Phaser.Scene {
             if (enemy._cryoBurst) enemy._shatterChecked = false;
 
             const speed = this.currentWave.enemySpeed * (this.enemySpeedModifier || 1);
-            // Cryo burst enemies move slightly faster; Brutes are slow but threatening
+            // Cryo burst enemies move slightly faster; Brutes are very slow
             let spd = speed;
             if (enemy._cryoBurst) spd = speed * 1.2;
-            if (enemy._isBrute)   spd = Math.min(speed * 0.85, 180); // menacing but readable
+            if (enemy._isBrute)   spd = Math.min(speed * 0.32, 68); // capped slow
             this.physics.moveToObject(enemy, this.player, spd);
         });
     }
@@ -457,13 +457,8 @@ class GameScene extends Phaser.Scene {
         const attackAnim = `sw_attack_${this._facing}`;
         this.player._playingAttack = true;
         this.player.play(attackAnim, true);
-        // Tag the key so we only clear the flag for THIS anim completing
-        this.player._attackAnimKey = attackAnim;
-        this.player.once('animationcomplete', (anim) => {
-            if (anim.key === this.player._attackAnimKey) {
-                this.player._playingAttack = false;
-                this.player._attackAnimKey = null;
-            }
+        this.player.once('animationcomplete', () => {
+            this.player._playingAttack = false;
         });
         
         // Slash Visual — blue/purple arc with particle burst
@@ -1757,25 +1752,15 @@ class GameScene extends Phaser.Scene {
 
         // Red Flash + Hurt animation
         const hurtAnim = `sw_hurt_${this._facing || 'down'}`;
-        // If an attack was mid-swing, cancel it cleanly first
-        this.player._playingAttack = false;
-        this.player._attackAnimKey = null;
         this.player._playingHurt = true;
         this.player.play(hurtAnim, true);
         this.player.once('animationcomplete', () => {
             this.player._playingHurt = false;
         });
-        // Blink for 1200ms — proper grace window after a hit
         this.tweens.add({
-            targets: this.player,
-            alpha: 0.3,
-            duration: 100,
-            yoyo: true,
-            repeat: 5,
-            onComplete: () => { this.player.alpha = 1; }
+            targets: this.player, alpha: 0.3, duration: 80, yoyo: true, repeat: 2,
+            onComplete: () => { this.player.invulnerable = false; this.player.alpha = 1; }
         });
-        // Invulnerability lasts the full 1200ms regardless of blink timing
-        this.time.delayedCall(1200, () => { this.player.invulnerable = false; });
 
         if (this.player.hp <= 0) {
             alert("DEFEATED. KILLS: " + score);
@@ -2146,11 +2131,68 @@ function showFusionModal(recipe, scene) {
             .join('  +  ');
     document.getElementById('fusion-name').innerText = fused.name;
     document.getElementById('fusion-description').innerText = fused.description;
+    const riskNote = document.getElementById('fusion-risk-note');
+    if (riskNote) riskNote.innerText = '⚠️ 5-10% chance to fail and destroy all ingredients when attempting this fusion.';
+    const resultNote = document.getElementById('fusion-result-note');
+    if (resultNote) {
+        resultNote.innerText = '';
+        resultNote.style.display = 'none';
+    }
 
     // Store recipe on modal for accept/decline
     document.getElementById('fusion-modal')._pendingRecipe = recipe;
     document.getElementById('fusion-modal').classList.remove('hidden');
     playFusionSound();
+}
+
+function setFusionResultMessage(message, success) {
+    const statusEl = document.getElementById('grace-fusion-status');
+    if (statusEl) {
+        statusEl.innerText = message || '';
+        statusEl.style.display = message ? 'block' : 'none';
+        statusEl.style.color = success ? '#00ff99' : '#ffaaaa';
+    }
+    const resultNote = document.getElementById('fusion-result-note');
+    if (resultNote) {
+        resultNote.innerText = message || '';
+        resultNote.style.display = message ? 'block' : 'none';
+        resultNote.style.color = success ? '#00ff99' : '#ffaaaa';
+    }
+}
+
+function fusionDidFail() {
+    const failChance = 0.05 + Math.random() * 0.05; // 5-10% failure range
+    return Math.random() < failChance;
+}
+
+function removeFusionIngredients(scene, recipe) {
+    if (!scene || !recipe) return;
+    if (recipe.requires) {
+        recipe.requires.forEach(reqId => {
+            const idx = scene.player.relics.findIndex(r => r.id === reqId);
+            if (idx !== -1) scene.player.relics.splice(idx, 1);
+        });
+    }
+    if (recipe.requiresNormal) {
+        recipe.requiresNormal.forEach(reqId => {
+            const idx = scene.player.relics.findIndex(r => r.id === reqId);
+            if (idx !== -1) scene.player.relics.splice(idx, 1);
+        });
+    }
+    if (recipe.requiresFused) {
+        recipe.requiresFused.forEach(reqId => {
+            const idx = scene.player.fusedRelics.findIndex(r => r.id === reqId);
+            if (idx !== -1) scene.player.fusedRelics.splice(idx, 1);
+        });
+    }
+}
+
+function showFusionResult(scene, success, message) {
+    if (scene && typeof scene._showWaveAlert === 'function') {
+        scene._showWaveAlert(message, success ? '#00ff99' : '#ff4444');
+    } else {
+        console.log(message);
+    }
 }
 
 function acceptFusion() {
@@ -2164,18 +2206,23 @@ function acceptFusion() {
         _graceScene._graceFusionPending = false;
         if (recipe) {
             const scene = _graceScene;
-            // Remove one copy of each ingredient relic -- their effects are consumed by fusion
-            recipe.requires.forEach(reqId => {
-                const idx = scene.player.relics.findIndex(r => r.id === reqId);
-                if (idx !== -1) scene.player.relics.splice(idx, 1);
-            });
-            // Add fused relic, recalculate all stats from scratch, then apply new effect
-            const fusedRelic = { ...recipe.result };
-            scene.player.fusedRelics.push(fusedRelic);
-            recalculatePlayerStats(scene);
-            fusedRelic.effect(scene.player, scene.currentWeapon, scene);
-            scene.updateRelicsDisplay();
-            updateHeartsDisplay(scene.player.hp, scene.player.maxHp);
+            const failed = fusionDidFail();
+            removeFusionIngredients(scene, recipe);
+            if (failed) {
+                scene.updateRelicsDisplay();
+                updateHeartsDisplay(scene.player.hp, scene.player.maxHp);
+                showFusionResult(scene, false, '⚠️ Fusion failed! Ingredients were destroyed.');
+                setFusionResultMessage('⚠️ Fusion failed! Ingredients were destroyed.', false);
+            } else {
+                const fusedRelic = { ...recipe.result };
+                scene.player.fusedRelics.push(fusedRelic);
+                recalculatePlayerStats(scene);
+                fusedRelic.effect(scene.player, scene.currentWeapon, scene);
+                scene.updateRelicsDisplay();
+                updateHeartsDisplay(scene.player.hp, scene.player.maxHp);
+                showFusionResult(scene, true, '✅ Fusion succeeded! The new relic has been forged.');
+                setFusionResultMessage('✅ Fusion succeeded! The new relic has been forged.', true);
+            }
             const btn = document.getElementById('grace-fusion-btn');
             if (btn) { btn.classList.add('hidden'); btn._recipe = null; }
         }
@@ -2185,16 +2232,23 @@ function acceptFusion() {
     // Fallback mid-game fusion (safety path -- normally only grace screen triggers fusion)
     if (recipe && pausedScene) {
         const scene = pausedScene;
-        recipe.requires.forEach(reqId => {
-            const idx = scene.player.relics.findIndex(r => r.id === reqId);
-            if (idx !== -1) scene.player.relics.splice(idx, 1);
-        });
-        const fusedRelic = { ...recipe.result };
-        scene.player.fusedRelics.push(fusedRelic);
-        recalculatePlayerStats(scene);
-        fusedRelic.effect(scene.player, scene.currentWeapon, scene);
-        scene.updateRelicsDisplay();
-        updateHeartsDisplay(scene.player.hp, scene.player.maxHp);
+        const failed = fusionDidFail();
+        removeFusionIngredients(scene, recipe);
+        if (failed) {
+            scene.updateRelicsDisplay();
+            updateHeartsDisplay(scene.player.hp, scene.player.maxHp);
+            showFusionResult(scene, false, '⚠️ Fusion failed! Ingredients were destroyed.');
+            setFusionResultMessage('⚠️ Fusion failed! Ingredients were destroyed.', false);
+        } else {
+            const fusedRelic = { ...recipe.result };
+            scene.player.fusedRelics.push(fusedRelic);
+            recalculatePlayerStats(scene);
+            fusedRelic.effect(scene.player, scene.currentWeapon, scene);
+            scene.updateRelicsDisplay();
+            updateHeartsDisplay(scene.player.hp, scene.player.maxHp);
+            showFusionResult(scene, true, '✅ Fusion succeeded! The new relic has been forged.');
+            setFusionResultMessage('✅ Fusion succeeded! The new relic has been forged.', true);
+        }
     }
 
     if (pausedScene) {
@@ -2412,16 +2466,27 @@ function showGracePeriod(scene) {
 
     // Show fusion button if a recipe is available and not yet at stack cap
     const fusionBtn = document.getElementById('grace-fusion-btn');
+    const fusionNote = document.getElementById('grace-fusion-note');
+    const fusionStatus = document.getElementById('grace-fusion-status');
     if (fusionBtn) {
         const recipe = checkFusionAvailable(player.relics);
         const canFuse = recipe && (player.fusedRelics.filter(r => r.id === recipe.result.id).length < (recipe.result.maxStack || 2));
         if (canFuse) {
             fusionBtn.classList.remove('hidden');
             fusionBtn._recipe = recipe;
+            if (fusionNote) {
+                fusionNote.style.display = 'block';
+                fusionNote.innerText = '⚠️ 5-10% chance to fail and destroy all ingredients when attempting this fusion.';
+            }
         } else {
             fusionBtn.classList.add('hidden');
             fusionBtn._recipe = null;
+            if (fusionNote) fusionNote.style.display = 'none';
         }
+    }
+    if (fusionStatus) {
+        fusionStatus.style.display = 'none';
+        fusionStatus.innerText = '';
     }
 
     // Check for secret fusion (available after wave 10)
@@ -2503,6 +2568,13 @@ function offerGraceFusion() {
             .join('  +  ');
     document.getElementById('fusion-name').innerText = fused.name;
     document.getElementById('fusion-description').innerText = fused.description;
+    const riskNote = document.getElementById('fusion-risk-note');
+    if (riskNote) riskNote.innerText = '⚠️ 5-10% chance to fail and destroy all ingredients when attempting this fusion.';
+    const resultNote = document.getElementById('fusion-result-note');
+    if (resultNote) {
+        resultNote.innerText = '';
+        resultNote.style.display = 'none';
+    }
     document.getElementById('fusion-modal')._pendingRecipe = recipe;
     document.getElementById('fusion-modal').classList.remove('hidden');
     playFusionSound();
@@ -2536,24 +2608,25 @@ function acceptSecretFusion() {
         _graceScene._graceSecretFusionPending = false;
         if (recipe && _graceScene.player) {
             const scene = _graceScene;
-            // Consume ingredients: remove one of each normal ingredient
-            recipe.requiresNormal.forEach(reqId => {
-                const idx = scene.player.relics.findIndex(r => r.id === reqId);
-                if (idx !== -1) scene.player.relics.splice(idx, 1);
-            });
-            // Remove one of each fused ingredient
-            recipe.requiresFused.forEach(reqId => {
-                const idx = scene.player.fusedRelics.findIndex(r => r.id === reqId);
-                if (idx !== -1) scene.player.fusedRelics.splice(idx, 1);
-            });
-            // Grant the secret relic
-            const newSR = { ...recipe.result, charges: 1 };
-            scene.player.secretRelics = scene.player.secretRelics || [];
-            scene.player.secretRelics.push(newSR);
-            recalculatePlayerStats(scene);
-            scene.updateRelicsDisplay();
-            updateHeartsDisplay(scene.player.hp, scene.player.maxHp);
-            updateSecretRelicHUD();
+            const failed = fusionDidFail();
+            removeFusionIngredients(scene, recipe);
+            if (failed) {
+                scene.updateRelicsDisplay();
+                updateHeartsDisplay(scene.player.hp, scene.player.maxHp);
+                updateSecretRelicHUD();
+                showFusionResult(scene, false, '⚠️ Secret fusion failed! Ingredients were destroyed.');
+                setFusionResultMessage('⚠️ Secret fusion failed! Ingredients were destroyed.', false);
+            } else {
+                const newSR = { ...recipe.result, charges: 1 };
+                scene.player.secretRelics = scene.player.secretRelics || [];
+                scene.player.secretRelics.push(newSR);
+                recalculatePlayerStats(scene);
+                scene.updateRelicsDisplay();
+                updateHeartsDisplay(scene.player.hp, scene.player.maxHp);
+                updateSecretRelicHUD();
+                showFusionResult(scene, true, '✅ Secret fusion succeeded! The legendary relic is yours.');
+                setFusionResultMessage('✅ Secret fusion succeeded! The legendary relic is yours.', true);
+            }
 
             // Hide secret fusion button
             const sfBtn = document.getElementById('grace-secret-fusion-btn');

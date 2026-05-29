@@ -83,7 +83,9 @@
             <div id="fusion-ingredients" style="font-size:18px;color:#ffaaaa;margin-bottom:14px;letter-spacing:1px;"></div>
             <div style="width:100%;height:1px;background:linear-gradient(90deg,transparent,#ff4444,transparent);margin-bottom:16px;"></div>
             <div id="fusion-name" style="font-size:28px;color:#ff6666;text-shadow:0 0 12px #ff4444;font-weight:bold;margin-bottom:8px;"></div>
-            <p id="fusion-description" style="font-size:16px;color:#ffcccc;line-height:1.5;margin:0 0 24px 0;opacity:0.9;"></p>
+            <p id="fusion-description" style="font-size:16px;color:#ffcccc;line-height:1.5;margin:0 0 14px 0;opacity:0.9;"></p>
+            <p id="fusion-risk-note" style="font-size:14px;color:#ffaaaa;line-height:1.4;margin:0 0 10px 0;opacity:0.95;">⚠️ 5-10% chance to fail and destroy all ingredients when attempting this fusion.</p>
+            <p id="fusion-result-note" style="font-size:15px;color:#00ff99;line-height:1.4;margin:0 0 14px 0;opacity:0.95;display:none;"></p>
             <p style="font-size:13px;color:#888;margin:0 0 20px 0;">The two source relics remain in your inventory. Max 2 fused relics of this type.</p>
             <div style="display:flex;gap:16px;justify-content:center;flex-wrap:wrap;">
                 <button onclick="acceptFusion()" style="background:linear-gradient(135deg,#cc0000,#880000);color:#fff;border-color:#ff4444;box-shadow:0 0 20px rgba(204,0,0,0.5);font-size:20px;padding:12px 36px;">⚗️ FUSE IT</button>
@@ -126,6 +128,8 @@
             <button onclick="openRelicInventory()" style="border-color:#00ff99; color:#00ff99; font-size:20px; padding:8px 24px; margin-top:0;">🎒 VIEW RELICS</button>
             <button id="grace-fusion-btn" onclick="offerGraceFusion()" class="hidden" style="border-color:#ff4444; color:#ff4444; font-size:20px; padding:8px 24px; margin-top:0; animation: graceFusionPulse 1.2s ease-in-out infinite alternate;">⚗️ FUSE RELICS</button>
             <button id="grace-secret-fusion-btn" onclick="offerGraceSecretFusion()" class="hidden" style="border-color:#ff00ff; color:#ff00ff; font-size:20px; padding:8px 24px; margin-top:0; animation: secretFusionPulse 1.0s ease-in-out infinite alternate;">🌈 ??? SECRET FUSION ???</button>
+            <div id="grace-fusion-note" style="font-size:14px;color:#ffaaaa;margin-top:12px;opacity:0.95;display:none;">⚠️ 5-10% chance to fail and destroy all ingredients when attempting a fusion.</div>
+            <div id="grace-fusion-status" style="font-size:15px;color:#00ff99;margin-top:10px;opacity:0.95;display:none;"></div>
         </div>
     </div>
 
@@ -182,6 +186,9 @@
                 <strong style="color:#ffffff;">one-shot all enemies for 5 waves</strong>,
                 or strip <strong style="color:#ffffff;">25% of a boss's max HP</strong> on the next hit.
                 Single use.
+            </p>
+            <p id="secret-fusion-risk" style="font-size:14px; color:#ffaaaa; margin:0 0 12px 0; text-align:center;">
+                ⚠️ 5-10% chance to fail and destroy all ingredients when attempting this fusion.
             </p>
             <p style="font-size:13px; color:#888; margin:0 0 22px 0;">All three source relics are consumed on fusion.</p>
             <div style="display:flex; gap:16px; justify-content:center; flex-wrap:wrap;">

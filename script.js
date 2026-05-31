@@ -33,6 +33,11 @@ if (!window._globalKeyState._listenersAdded) {
         try {
             const scene = phaserGame && phaserGame.scene && phaserGame.scene.scenes[0];
             if (scene && scene.player) {
+                if (scene._defeatTriggered) {
+                    lastTs = ts;
+                    requestAnimationFrame(frame);
+                    return;
+                }
                 const isPaused = scene.scene.isPaused();
                 if (isPaused || scene.inputLocked) {
                     const gs = window._globalKeyState;
@@ -1825,8 +1830,7 @@ class GameScene extends Phaser.Scene {
         });
 
         if (this.player.hp <= 0) {
-            alert("DEFEATED. KILLS: " + score);
-            location.reload();
+            this.showDefeatScreen();
         }
     }
 
@@ -1993,6 +1997,93 @@ class GameScene extends Phaser.Scene {
         document.getElementById('levelUpScreen').classList.remove('hidden');
     }
 
+    // ── Defeat Screen ─────────────────────────────────────────
+    showDefeatScreen() {
+        if (this._defeatTriggered) return;
+        this._defeatTriggered = true;
+        this.inputLocked = true;
+
+        // Stop any active music
+        try {
+            if (this.music)        { this.music.stop();        this.music.destroy();        this.music = null; }
+            if (this.downtimeMusic){ this.downtimeMusic.stop(); this.downtimeMusic.destroy(); this.downtimeMusic = null; }
+        } catch(e) {}
+
+        // ── 1. Play death animation on the player sprite ─────
+        if (this.player.body) this.player.body.setVelocity(0);
+        this.player.play('sw_death');
+
+        // ── 2. Scatter all living enemies outward ─────────────
+        this.enemies.getChildren().forEach(enemy => {
+            if (!enemy || !enemy.active) return;
+            // Angle directly away from player
+            const angle = Phaser.Math.Angle.Between(
+                this.player.x, this.player.y, enemy.x, enemy.y
+            );
+            const speed = Phaser.Math.Between(80, 180);
+            if (enemy.body) {
+                enemy.body.setVelocity(
+                    Math.cos(angle) * speed,
+                    Math.sin(angle) * speed
+                );
+                // Slow to a stop over 1.5s
+                this.tweens.add({
+                    targets: enemy.body.velocity,
+                    x: 0, y: 0,
+                    duration: 1500,
+                    ease: 'Quad.easeOut'
+                });
+            }
+            // Fade enemy out after scatter
+            this.tweens.add({
+                targets: enemy,
+                alpha: 0,
+                delay: 1000,
+                duration: 800,
+                ease: 'Linear'
+            });
+        });
+
+        // ── 3. Darken backdrop after a beat ──────────────────
+        const defeatScreen = document.getElementById('defeatScreen');
+        defeatScreen.classList.remove('hidden');
+        defeatScreen.classList.add('active');
+
+        window.setTimeout(() => {
+            document.getElementById('defeat-backdrop').classList.add('dark');
+        }, 400);
+
+        // ── 4. Populate and reveal UI after death anim (~0.9s) ─
+        // Death anim = 7 frames @ 8fps ≈ 875ms
+        window.setTimeout(() => {
+            // Fill stats
+            document.getElementById('defeat-kills').innerText = score;
+            document.getElementById('defeat-wave').innerText  = this.waveIndex + 1;
+
+            const allRelics = [
+                ...(this.player.relics       || []),
+                ...(this.player.fusedRelics   || []),
+                ...(this.player.secretRelics  || [])
+            ];
+            document.getElementById('defeat-relics').innerText = allRelics.length;
+
+            // Relic icon chips
+            const iconsEl = document.getElementById('defeat-relic-icons');
+            iconsEl.innerHTML = '';
+            allRelics.forEach(r => {
+                const chip = document.createElement('span');
+                chip.className = 'defeat-relic-chip';
+                chip.title     = r.name;
+                chip.textContent = r.icon || '?';
+                iconsEl.appendChild(chip);
+            });
+
+            // Reveal UI panel and pause the scene once the defeat screen is visible.
+            document.getElementById('defeat-ui').classList.remove('hidden');
+            this.scene.pause();
+        });
+    }
+
     showVictory() {
         document.getElementById('levelUpTitle').innerText = 'SYSTEM RESTORED';
         document.getElementById('evolveDescription').innerText = 'You cleared every wave. Restart to fight again.';
@@ -2019,6 +2110,11 @@ const config = {
 };
 
 // Bridge functions
+function restartFromDefeat() {
+    // Hard reload — cleanest way to reset all Phaser state and globals
+    location.reload();
+}
+
 function startGame() {
     document.getElementById('startScreen').classList.add('hidden');
     document.getElementById('hud').classList.remove('hidden');
@@ -2503,6 +2599,81 @@ function throwRelic(relicId, isFused, isSecret) {
     openRelicInventory();
 }
 
+// ===== RELIC TUTORIAL =====
+let _tutorialSeen = false;      // flips to true after first dismissal
+let _tutorialStep = 0;
+let _tutorialGraceFrozen = false; // true while tutorial blocks the grace timer
+
+const TUTORIAL_SLIDES = 3;
+
+/**
+ * Opens the relic tutorial overlay and freezes the grace-period countdown.
+ * Called automatically on the first grace period only.
+ */
+function showRelicTutorial() {
+    _tutorialStep = 0;
+    _tutorialGraceFrozen = true;
+
+    // Reset to slide 0
+    for (let i = 0; i < TUTORIAL_SLIDES; i++) {
+        const slide = document.getElementById('tslide-' + i);
+        const dot   = document.getElementById('tdot-'   + i);
+        if (slide) slide.classList.toggle('hidden', i !== 0);
+        if (dot)   dot.classList.toggle('active',  i === 0);
+    }
+    _syncTutorialBtn();
+
+    document.getElementById('relic-tutorial-overlay').classList.remove('hidden');
+}
+
+/** Advance to next slide, or close on the last slide. */
+function relicTutorialNext() {
+    _tutorialStep++;
+    if (_tutorialStep >= TUTORIAL_SLIDES) {
+        relicTutorialClose();
+        return;
+    }
+
+    for (let i = 0; i < TUTORIAL_SLIDES; i++) {
+        const slide = document.getElementById('tslide-' + i);
+        const dot   = document.getElementById('tdot-'   + i);
+        if (slide) slide.classList.toggle('hidden', i !== _tutorialStep);
+        if (dot)   dot.classList.toggle('active',  i === _tutorialStep);
+    }
+    _syncTutorialBtn();
+}
+
+/** Skip straight to close. */
+function relicTutorialSkip() {
+    relicTutorialClose();
+}
+
+/** Close the overlay and resume the grace countdown. */
+function relicTutorialClose() {
+    document.getElementById('relic-tutorial-overlay').classList.add('hidden');
+    _tutorialSeen = true;
+    _tutorialGraceFrozen = false;
+    // Resume the grace-period timer — re-invoke the pending tick loop
+    if (_graceTimer !== null) {
+        // Timer is already ticking (was paused by the frozen flag)
+        // nothing more to do — the tick loop will now advance normally
+    }
+}
+
+/** Update the Next button label on the last slide. */
+function _syncTutorialBtn() {
+    const btn       = document.getElementById('relic-tutorial-next-btn');
+    const arrowSpan = document.getElementById('relic-tutorial-btn-arrow');
+    if (!btn) return;
+    if (_tutorialStep === TUTORIAL_SLIDES - 1) {
+        btn.childNodes[0].textContent = 'GOT IT ';
+        if (arrowSpan) arrowSpan.textContent = '✔';
+    } else {
+        btn.childNodes[0].textContent = 'NEXT ';
+        if (arrowSpan) arrowSpan.textContent = '▶';
+    }
+}
+
 // ===== GRACE PERIOD =====
 let _graceTimer = null;
 let _graceScene = null;
@@ -2575,13 +2746,32 @@ function showGracePeriod(scene) {
 
     document.getElementById('graceScreen').classList.remove('hidden');
 
+    // Show relic tutorial on the very first grace period
+    if (!_tutorialSeen && prevWaveIndex === 0) {
+        showRelicTutorial();
+    }
+
     // Animate timer bar shrinking
     // Use requestAnimationFrame for smooth bar
     const startTime = performance.now();
     const duration = 10000;
+    let frozenElapsed = 0;   // accumulated time spent frozen (tutorial open)
+    let lastFrozenCheck = null;
 
     function tick(now) {
-        const elapsed = now - startTime;
+        // Pause the countdown while the tutorial overlay is visible
+        if (_tutorialGraceFrozen) {
+            lastFrozenCheck = now;
+            _graceTimer = requestAnimationFrame(tick);
+            return;
+        }
+        // If we just came out of a freeze, absorb the frozen gap
+        if (lastFrozenCheck !== null) {
+            frozenElapsed += now - lastFrozenCheck;
+            lastFrozenCheck = null;
+        }
+
+        const elapsed = now - startTime - frozenElapsed;
         const remaining = Math.max(0, duration - elapsed);
         const pct = (remaining / duration) * 100;
         const fillEl = document.getElementById('grace-timer-fill');

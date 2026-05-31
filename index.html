@@ -198,6 +198,100 @@
         </div>
     </div>
 
+    <!-- Relic Tutorial Overlay (shown once after Wave 1 grace period opens) -->
+    <div id="relic-tutorial-overlay" class="relic-tutorial-overlay hidden">
+        <div class="relic-tutorial-box">
+            <!-- Step indicator -->
+            <div class="relic-tutorial-steps">
+                <span class="relic-tutorial-dot active" id="tdot-0"></span>
+                <span class="relic-tutorial-dot" id="tdot-1"></span>
+                <span class="relic-tutorial-dot" id="tdot-2"></span>
+            </div>
+
+            <!-- Slide 0 -->
+            <div class="relic-tutorial-slide" id="tslide-0">
+                <div class="relic-tutorial-icon">🎒</div>
+                <h2 class="relic-tutorial-title">YOU FOUND A RELIC</h2>
+                <p class="relic-tutorial-body">
+                    Relics drop when you <strong>kill enemies</strong>.<br>
+                    Walk over the glowing orb to pick it up.<br><br>
+                    A pop-up will ask if you want to <strong>TAKE IT</strong> or <strong>LEAVE IT</strong> — choose carefully, you can only hold <strong>10 relics</strong> at once.
+                </p>
+            </div>
+
+            <!-- Slide 1 -->
+            <div class="relic-tutorial-slide hidden" id="tslide-1">
+                <div class="relic-tutorial-icon">⚡</div>
+                <h2 class="relic-tutorial-title">RELIC EFFECTS</h2>
+                <p class="relic-tutorial-body">
+                    Each relic gives you a <strong>permanent passive boost</strong> — faster attacks, more HP, bigger slashes, contact freeze, and more.<br><br>
+                    Tap <strong>🎒 RELICS</strong> in the top-left at any time to see everything you're carrying and read full descriptions.
+                </p>
+                <div class="relic-tutorial-example-row">
+                    <span title="Overclock Core">⚡</span>
+                    <span title="Cryo Shard">❄️</span>
+                    <span title="Fracture Lens">🔷</span>
+                    <span title="Swift Boots">👟</span>
+                    <span title="Aegis Core (fused)">🔵</span>
+                </div>
+            </div>
+
+            <!-- Slide 2 -->
+            <div class="relic-tutorial-slide hidden" id="tslide-2">
+                <div class="relic-tutorial-icon">⚗️</div>
+                <h2 class="relic-tutorial-title">FUSION</h2>
+                <p class="relic-tutorial-body">
+                    Collect two compatible relics and a <strong>⚗️ FUSE RELICS</strong> button appears here between waves.<br><br>
+                    Fusing combines their power into a single <strong>legendary relic</strong> — but there's a small chance of failure that destroys both. Worth the risk.
+                </p>
+                <div class="relic-tutorial-fusion-preview">
+                    <span>⚡</span><span class="relic-tutorial-plus">+</span><span>📏</span>
+                    <span class="relic-tutorial-arrow">→</span>
+                    <span class="relic-tutorial-fused">🔴</span>
+                    <span class="relic-tutorial-fused-label">Voltfire Matrix</span>
+                </div>
+            </div>
+
+            <!-- Nav button -->
+            <button id="relic-tutorial-next-btn" onclick="relicTutorialNext()" class="relic-tutorial-btn">
+                NEXT <span id="relic-tutorial-btn-arrow">▶</span>
+            </button>
+
+            <!-- Skip link -->
+            <button onclick="relicTutorialSkip()" class="relic-tutorial-skip">skip tutorial</button>
+        </div>
+    </div>
+
+    <!-- ===== DEFEAT SCREEN ===== -->
+    <div id="defeatScreen" class="overlay hidden" style="background:rgba(0,0,0,0);">
+        <!-- Cinematic darkening backdrop (fades in) -->
+        <div id="defeat-backdrop" class="defeat-backdrop"></div>
+
+        <!-- Phaser canvas clone area — the sprite plays there, we overlay UI here -->
+        <div id="defeat-ui" class="defeat-ui hidden">
+            <div class="defeat-skull-row">
+                <span class="defeat-skull">☠</span>
+            </div>
+            <h1 class="defeat-title">DEFEATED</h1>
+            <div class="defeat-stats-row">
+                <div class="defeat-stat">
+                    <span class="defeat-stat-label">KILLS</span>
+                    <span class="defeat-stat-value" id="defeat-kills">0</span>
+                </div>
+                <div class="defeat-stat">
+                    <span class="defeat-stat-label">WAVE</span>
+                    <span class="defeat-stat-value" id="defeat-wave">1</span>
+                </div>
+                <div class="defeat-stat">
+                    <span class="defeat-stat-label">RELICS</span>
+                    <span class="defeat-stat-value" id="defeat-relics">0</span>
+                </div>
+            </div>
+            <div id="defeat-relic-icons" class="defeat-relic-icons"></div>
+            <button onclick="restartFromDefeat()" class="defeat-restart-btn">▶ TRY AGAIN</button>
+        </div>
+    </div>
+
     <!-- Aegis Core recharge HUD -->
     <div id="aegis-recharge-hud" class="hidden" style="position:absolute;bottom:28px;left:50%;transform:translateX(-50%);z-index:60;font-family:'VT323',monospace;font-size:22px;color:#00ccff;text-shadow:0 0 10px #00ccff;pointer-events:none;background:rgba(0,0,0,0.6);padding:6px 18px;border:1px solid #00ccff;border-radius:6px;"></div>
 

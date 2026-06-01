@@ -48,12 +48,12 @@ const relicPool = [
         id: 'plasma_extender',
         name: 'Plasma Extender',
         icon: '📏',
-        description: 'Extends attack reach by +25 units.',
+        description: 'Extends attack reach by +15 units.',
         color: 0x00ffff,
         glowColor: '#00ffff',
         isFused: false,
         effect(player, weapon, scene) {
-            weapon.range += 25;
+            weapon.range += 15;
         }
     },
     {
@@ -184,13 +184,13 @@ const fusionRecipes = [
             id: 'glacial_arc',
             name: 'Glacial Arc',
             icon: '❄️',
-            description: 'Freezing energy empowers your reach: melee range +15 and attacks can briefly freeze enemies. Max 2 stacks.',
+            description: 'Freezing energy empowers your reach: melee range +10 and attacks can briefly freeze enemies. Max 2 stacks.',
             color: 0x88ccff,
             glowColor: '#88ddff',
             isFused: true,
             maxStack: 2,
             effect(player, weapon, scene) {
-                weapon.range = (weapon.range || 150) + 15;
+                weapon.range = (weapon.range || 150) + 10;
                 player.attackFreezes = true;
                 player.attackFreezeDuration = Math.max(player.attackFreezeDuration || 0, 600);
                 player.glacialStacks = (player.glacialStacks || 0) + 1;

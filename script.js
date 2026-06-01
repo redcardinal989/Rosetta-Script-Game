@@ -3,6 +3,7 @@ let score = 0;
 let pausedScene = null; // Track paused scene for relic modal
 let _sfxVolume = 0.7;
 let _graceMusicVolume = 0.5;
+let _ambienceVolume = 0.35;
 
 function formatVolumePercent(value) {
     return `${Math.round(value * 100)}%`;
@@ -27,10 +28,23 @@ function setGraceMusicVolume(value, syncSlider = true) {
     }
 }
 
+function setAmbienceVolume(value, syncSlider = true) {
+    _ambienceVolume = Math.max(0, Math.min(1, Number(value)));
+    const label = document.getElementById('ambienceVolumeLabel');
+    if (label) label.textContent = formatVolumePercent(_ambienceVolume);
+    const slider = document.getElementById('ambienceVolumeSlider');
+    if (slider && syncSlider) slider.value = _ambienceVolume;
+    const scene = phaserGame && phaserGame.scene && phaserGame.scene.scenes[0];
+    if (scene && scene.music) {
+        try { scene.music.setVolume(_ambienceVolume); } catch (e) {}
+    }
+}
+
 window.handleSfxVolumeChange = setSfxVolume;
 window.handleGraceMusicVolumeChange = setGraceMusicVolume;
-window.toggleVolumePanel = function() {
-    const panel = document.getElementById('volume-panel');
+window.handleAmbienceVolumeChange = setAmbienceVolume;
+window.toggleSettingsPanel = function() {
+    const panel = document.getElementById('settings-panel');
     if (!panel) return;
     const opening = panel.classList.contains('hidden');
     const scene = phaserGame && phaserGame.scene && phaserGame.scene.scenes[0];
@@ -40,35 +54,37 @@ window.toggleVolumePanel = function() {
             if (scene && !scene.scene.isPaused()) {
                 scene.inputLocked = true;
                 scene.scene.pause();
-                window._volumePanelPausedScene = true;
+                window._settingsPanelPausedScene = true;
             }
         } catch (e) {}
         panel.classList.remove('hidden');
     } else {
         // Closing: resume only if we paused it
         try {
-            if (scene && window._volumePanelPausedScene) {
+            if (scene && window._settingsPanelPausedScene) {
                 scene.scene.resume();
                 scene.inputLocked = false;
-                window._volumePanelPausedScene = false;
+                window._settingsPanelPausedScene = false;
             }
         } catch (e) {}
         panel.classList.add('hidden');
     }
 };
+window.toggleVolumePanel = window.toggleSettingsPanel;
 
 document.addEventListener('DOMContentLoaded', () => {
     try {
         setSfxVolume(_sfxVolume, false);
         setGraceMusicVolume(_graceMusicVolume, false);
+        setAmbienceVolume(_ambienceVolume, false);
     } catch (e) {}
-    // Close panel when clicking outside (use toggle to correctly resume scene)
+    // Close settings panel when clicking outside (use toggle to correctly resume scene)
     document.addEventListener('click', (e) => {
-        const panel = document.getElementById('volume-panel');
+        const panel = document.getElementById('settings-panel');
         if (!panel) return;
-        if (!panel.classList.contains('hidden') && !e.target.closest('#volume-container')) {
+        if (!panel.classList.contains('hidden') && !e.target.closest('#settings-container')) {
             // call the toggle to ensure resume logic runs if we paused
-            try { window.toggleVolumePanel(); } catch (err) { panel.classList.add('hidden'); }
+            try { window.toggleSettingsPanel(); } catch (err) { panel.classList.add('hidden'); }
         }
     });
 });
@@ -333,6 +349,10 @@ class GameScene extends Phaser.Scene {
     this.arenaBg = this.add.image(width / 2, height / 2, 'arena1');
     this.arenaBg.setDisplaySize(width, height);
     this.arenaBg.setDepth(-10);
+
+    this.scale.on('resize', (gameSize) => {
+        this.resizeGame(gameSize.width, gameSize.height);
+    });
 
         
         // ── Register directional animations from multi-row spritesheets ─────────
@@ -895,6 +915,7 @@ class GameScene extends Phaser.Scene {
         const enemy = this.add.circle(x, y, 8, enemyColor);
         this.enemies.add(enemy);
         this.physics.add.existing(enemy);
+        this._shrinkEnemyHitbox(enemy, 8, 0.65);
 
         // HP scaling: every 5 waves enemies gain +1 max HP
         // Wave 1-4 = 1hp, Wave 5-9 = 2hp, Wave 10-14 = 3hp, etc.
@@ -906,6 +927,18 @@ class GameScene extends Phaser.Scene {
         if (hpTier > 0) {
             const strokeColor = hpTier >= 3 ? 0xffffff : hpTier >= 2 ? 0xffcc00 : 0xaaaaaa;
             enemy.setStrokeStyle(1 + hpTier, strokeColor);
+        }
+    }
+
+    _shrinkEnemyHitbox(enemy, radius, scale = 0.6) {
+        if (!enemy || !enemy.body) return;
+        const body = enemy.body;
+        const diameter = radius * 2 * scale;
+        if (body.setCircle) {
+            body.setCircle(radius * scale, radius - (diameter / 2), radius - (diameter / 2));
+        } else {
+            body.setSize(diameter, diameter);
+            body.setOffset(radius - diameter / 2, radius - diameter / 2);
         }
     }
 
@@ -962,6 +995,7 @@ class GameScene extends Phaser.Scene {
         this.enemies.add(splitter);
         this.physics.add.existing(splitter);
         splitter.body.setCollideWorldBounds(true);
+        this._shrinkEnemyHitbox(splitter, 17, 0.65);
         // HP scales with wave tier but always at least 5 — noticeably tankier than normals
         const splitterTier = Math.floor(this.waveIndex / 5);
         splitter.hp = 5 + splitterTier * 2;
@@ -1020,6 +1054,7 @@ class GameScene extends Phaser.Scene {
             this.enemies.add(frag);
             this.physics.add.existing(frag);
             frag.body.setCollideWorldBounds(true);
+            this._shrinkEnemyHitbox(frag, 6, 0.65);
             frag.hp = 2;
             frag.maxHp = 2;
             frag._isSplitterFrag = true;
@@ -1062,6 +1097,7 @@ class GameScene extends Phaser.Scene {
         this.enemies.add(cryo);
         this.physics.add.existing(cryo);
         cryo.body.setCollideWorldBounds(true);
+        this._shrinkEnemyHitbox(cryo, 10, 0.65);
         const hpTier = Math.floor(this.waveIndex / 5);
         cryo.hp = 1 + hpTier;
         cryo.maxHp = cryo.hp;
@@ -1198,6 +1234,7 @@ class GameScene extends Phaser.Scene {
         this.enemies.add(brute);
         this.physics.add.existing(brute);
         brute.body.setCollideWorldBounds(true);
+        this._shrinkEnemyHitbox(brute, 24, 0.75);
 
         // HP: substantial — scales up with wave
         const bruteTier = Math.floor((this.waveIndex - 10) / 5);
@@ -2261,7 +2298,7 @@ class GameScene extends Phaser.Scene {
                 this.music.destroy();
                 this.music = null;
             }
-            this.music = this.sound.add('ambience', { loop: true, volume: 0.35 });
+            this.music = this.sound.add('ambience', { loop: true, volume: _ambienceVolume });
             this.music.play();
         } catch(e) {}
     }
@@ -2274,6 +2311,28 @@ class GameScene extends Phaser.Scene {
                 this.music = null;
             }
         } catch(e) {}
+    }
+
+    resizeGame(width, height) {
+        if (!width || !height) return;
+        if (this.arenaBg) {
+            this.arenaBg.setPosition(width / 2, height / 2);
+            this.arenaBg.setDisplaySize(width, height);
+        }
+        if (this.cameras && this.cameras.main) {
+            this.cameras.main.setViewport(0, 0, width, height);
+        }
+        if (this.physics && this.physics.world) {
+            this.physics.world.setBounds(0, 0, width, height);
+        }
+        if (this.player) {
+            const px = Phaser.Math.Clamp(this.player.x, 0, width);
+            const py = Phaser.Math.Clamp(this.player.y, 0, height);
+            this.player.setPosition(px, py);
+            if (this.player.body && typeof this.player.body.reset === 'function') {
+                this.player.body.reset(px, py);
+            }
+        }
     }
 
     updateWaveUI() {
@@ -2419,9 +2478,13 @@ class GameScene extends Phaser.Scene {
 // Global Config
 const config = {
     type: Phaser.AUTO,
-    width: window.innerWidth,
-    height: window.innerHeight,
-    parent: 'game-container',
+    scale: {
+        mode: Phaser.Scale.RESIZE,
+        autoCenter: Phaser.Scale.CENTER_BOTH,
+        parent: 'game-container',
+        width: window.innerWidth,
+        height: window.innerHeight
+    },
     backgroundColor: '#050505',
     physics: { default: 'arcade', arcade: { debug: false } },
     scene: [GameScene]
@@ -2437,6 +2500,19 @@ function startGame() {
     document.getElementById('startScreen').classList.add('hidden');
     document.getElementById('hud').classList.remove('hidden');
     phaserGame = new Phaser.Game(config);
+    window.addEventListener('resize', () => {
+        if (phaserGame && phaserGame.scale) {
+            phaserGame.scale.resize(window.innerWidth, window.innerHeight);
+        }
+    });
+    const target = document.documentElement;
+    if (target.requestFullscreen) {
+        target.requestFullscreen().catch(() => {});
+    } else if (target.webkitRequestFullscreen) {
+        target.webkitRequestFullscreen();
+    } else if (target.msRequestFullscreen) {
+        target.msRequestFullscreen();
+    }
     // Hearts will be initialized after create() runs; set a small delay
     setTimeout(() => {
         const scene = phaserGame.scene.scenes[0];
@@ -2455,6 +2531,33 @@ function activateSecretRelicBtn() {
     const scene = phaserGame && phaserGame.scene.scenes[0];
     if (scene && scene.activateSecretRelic) scene.activateSecretRelic();
 }
+
+function toggleFullscreen() {
+    const button = document.getElementById('fullscreen-btn');
+    const target = document.documentElement;
+    if (document.fullscreenElement) {
+        document.exitFullscreen().catch(() => {});
+        if (button) button.innerText = '⛶ FULLSCREEN';
+        return;
+    }
+    if (target.requestFullscreen) {
+        target.requestFullscreen().catch(() => {});
+    } else if (target.webkitRequestFullscreen) {
+        target.webkitRequestFullscreen();
+    } else if (target.msRequestFullscreen) {
+        target.msRequestFullscreen();
+    }
+}
+
+document.addEventListener('fullscreenchange', () => {
+    const button = document.getElementById('fullscreen-btn');
+    if (!button) return;
+    if (document.fullscreenElement) {
+        button.innerText = '❎ EXIT FULLSCREEN';
+    } else {
+        button.innerText = '⛶ FULLSCREEN';
+    }
+});
 
 /** Updates the secret relic HUD button — shows charges remaining, hides when none. */
 function updateSecretRelicHUD() {

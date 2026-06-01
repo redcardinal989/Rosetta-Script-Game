@@ -61,6 +61,8 @@
             margin-top: 10px;
         }
 
+        #settings-btn,
+        #fullscreen-btn,
         #volume-btn {
             border-color: #00ff99;
             color: #00ff99;
@@ -68,28 +70,41 @@
             font-size: 16px;
             background: rgba(0,0,0,0.4);
             transition: transform 0.2s, background 0.2s;
+            cursor: pointer;
         }
 
+        #settings-btn:hover,
+        #fullscreen-btn:hover,
         #volume-btn:hover {
             background: rgba(0,255,153,0.12);
             transform: translateY(-1px);
+        }
+
+        #settings-panel {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            min-width: 260px;
+            padding: 14px;
+            background: rgba(0, 0, 0, 0.95);
+            border: 1px solid rgba(0, 255, 153, 0.25);
+            border-radius: 10px;
+            box-shadow: 0 0 18px rgba(0,255,153,0.16);
+            pointer-events: all;
+            position: absolute;
+            top: 42px;
+            right: 0;
+            z-index: 70;
+        }
+
+        #settings-panel.hidden {
+            display: none;
         }
 
         #volume-panel {
             display: flex;
             flex-direction: column;
             gap: 10px;
-            min-width: 240px;
-            padding: 12px;
-            background: rgba(0, 0, 0, 0.9);
-            border: 1px solid rgba(0, 255, 153, 0.25);
-            border-radius: 10px;
-            box-shadow: 0 0 18px rgba(0,255,153,0.14);
-            pointer-events: all;
-        }
-
-        #volume-panel.hidden {
-            display: none;
         }
 
         #volume-panel label {
@@ -242,15 +257,25 @@
             <button id="secret-relic-btn" class="hidden secret-relic-btn" onclick="activateSecretRelicBtn()" title="Activate It's So Cold It Burns">
                 ❄️🔥 <span id="secret-relic-label">IT'S SO COLD IT BURNS</span>
             </button>
-            <div id="volume-container">
-                <button id="volume-btn" onclick="toggleVolumePanel()" title="Toggle volume controls">🔊 VOLUME</button>
-                <div id="volume-panel" class="hidden" onclick="event.stopPropagation();">
-                    <label for="sfxVolumeSlider">Effects volume <span id="sfxVolumeLabel">70%</span>
-                        <input id="sfxVolumeSlider" type="range" min="0" max="1" step="0.05" value="0.7" oninput="handleSfxVolumeChange(this.value)" onchange="handleSfxVolumeChange(this.value)">
-                    </label>
-                    <label for="graceMusicVolumeSlider">Grace music <span id="graceMusicVolumeLabel">50%</span>
-                        <input id="graceMusicVolumeSlider" type="range" min="0" max="1" step="0.05" value="0.5" oninput="handleGraceMusicVolumeChange(this.value)" onchange="handleGraceMusicVolumeChange(this.value)">
-                    </label>
+            <div id="settings-container" style="position:relative;">
+                <button id="settings-btn" onclick="toggleSettingsPanel()" title="Open settings">
+                    ⚙️ SETTINGS
+                </button>
+                <div id="settings-panel" class="hidden" onclick="event.stopPropagation();">
+                    <button id="fullscreen-btn" onclick="toggleFullscreen()" title="Toggle fullscreen">
+                        ⛶ FULLSCREEN
+                    </button>
+                    <div id="volume-panel">
+                        <label for="sfxVolumeSlider">Effects volume <span id="sfxVolumeLabel">70%</span>
+                            <input id="sfxVolumeSlider" type="range" min="0" max="1" step="0.05" value="0.7" oninput="handleSfxVolumeChange(this.value)" onchange="handleSfxVolumeChange(this.value)">
+                        </label>
+                        <label for="ambienceVolumeSlider">BG music volume <span id="ambienceVolumeLabel">35%</span>
+                            <input id="ambienceVolumeSlider" type="range" min="0" max="1" step="0.05" value="0.35" oninput="handleAmbienceVolumeChange(this.value)" onchange="handleAmbienceVolumeChange(this.value)">
+                        </label>
+                        <label for="graceMusicVolumeSlider">Grace music <span id="graceMusicVolumeLabel">50%</span>
+                            <input id="graceMusicVolumeSlider" type="range" min="0" max="1" step="0.05" value="0.5" oninput="handleGraceMusicVolumeChange(this.value)" onchange="handleGraceMusicVolumeChange(this.value)">
+                        </label>
+                    </div>
                 </div>
             </div>
         </div>

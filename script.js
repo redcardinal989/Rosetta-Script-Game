@@ -316,6 +316,8 @@ class GameScene extends Phaser.Scene {
         this.load.audio('hit', 'hit.mp3');
         this.load.audio('relicPickup', 'relicPickup.mp3');
         this.load.image('arena1', 'arena1.png');
+        this.load.image('arena2', 'arena2.png');
+        this.load.image('arena3', 'arena3.png');
         this.load.audio('downtime', 'downtime.mp3');
         this.load.audio('fusion', 'fusion.mp3');
         this.load.audio('ambience', 'ambience.mp3');
@@ -348,10 +350,22 @@ class GameScene extends Phaser.Scene {
         
        const { width, height } = this.scale;
 
-    // Background
+    // Background — three layers stacked; alpha driven by wave progress
     this.arenaBg = this.add.image(width / 2, height / 2, 'arena1');
     this.arenaBg.setDisplaySize(width, height);
     this.arenaBg.setDepth(-10);
+
+    // Golden-hour layer (arena2) — fades in from wave 8 → 16
+    this.arenaBg2 = this.add.image(width / 2, height / 2, 'arena2');
+    this.arenaBg2.setDisplaySize(width, height);
+    this.arenaBg2.setDepth(-9);
+    this.arenaBg2.setAlpha(0);
+
+    // Night layer (arena3) — fades in from wave 16 → 24
+    this.arenaBg3 = this.add.image(width / 2, height / 2, 'arena3');
+    this.arenaBg3.setDisplaySize(width, height);
+    this.arenaBg3.setDepth(-8);
+    this.arenaBg3.setAlpha(0);
 
     this.scale.on('resize', (gameSize) => {
         this.resizeGame(gameSize.width, gameSize.height);
@@ -2322,6 +2336,14 @@ class GameScene extends Phaser.Scene {
             this.arenaBg.setPosition(width / 2, height / 2);
             this.arenaBg.setDisplaySize(width, height);
         }
+        if (this.arenaBg2) {
+            this.arenaBg2.setPosition(width / 2, height / 2);
+            this.arenaBg2.setDisplaySize(width, height);
+        }
+        if (this.arenaBg3) {
+            this.arenaBg3.setPosition(width / 2, height / 2);
+            this.arenaBg3.setDisplaySize(width, height);
+        }
         if (this.cameras && this.cameras.main) {
             this.cameras.main.setViewport(0, 0, width, height);
         }
@@ -2348,6 +2370,49 @@ class GameScene extends Phaser.Scene {
 
         if (this.currentWave.bossWave && !this.boss) {
             document.getElementById('boss-health-fill').style.width = '100%';
+        }
+
+        // Update day/night cycle visuals
+        this.updateDayCycle();
+    }
+
+    updateDayCycle() {
+        // waveIndex 0-7:  full day (arena1 only)
+        // waveIndex 8-15: golden hour fades in (arena2 alpha 0→1)
+        // waveIndex 16-24: night fades in (arena3 alpha 0→1, arena2 stays at 1)
+        const w = this.waveIndex;
+        const TOTAL_WAVES = 24;
+
+        let alpha2 = 0;
+        let alpha3 = 0;
+
+        if (w >= 8 && w < 16) {
+            // Phase 1: day → golden hour
+            alpha2 = (w - 8) / 8; // 0 at wave 8, 1 at wave 16
+        } else if (w >= 16) {
+            // Phase 2: golden hour → night (smooth crossfade)
+            const phaseProgress = (w - 16) / 8; // 0 at wave 16, 1 at wave 24
+            alpha2 = 1 - phaseProgress; // 1 at wave 16, fades to 0 at wave 24
+            alpha3 = phaseProgress; // 0 at wave 16, fades to 1 at wave 24
+        }
+
+        const tweenDuration = 1800;
+
+        if (this.arenaBg2) {
+            this.tweens.add({
+                targets: this.arenaBg2,
+                alpha: alpha2,
+                duration: tweenDuration,
+                ease: 'Sine.easeInOut'
+            });
+        }
+        if (this.arenaBg3) {
+            this.tweens.add({
+                targets: this.arenaBg3,
+                alpha: alpha3,
+                duration: tweenDuration,
+                ease: 'Sine.easeInOut'
+            });
         }
     }
 

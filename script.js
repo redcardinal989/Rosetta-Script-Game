@@ -231,7 +231,7 @@ function getRandomPowerOptions(index) {
 function createWaveConfig(index) {
     const template = waveTemplateBase[index % waveTemplateBase.length];
     const phase = Math.floor(index / waveTemplateBase.length);
-    const mixedWave = ((index + 1) % 5 === 0);
+    const mixedWave = index >= 1; // waves after the first include a variety of enemy types
 
     // Speed ramps very gradually — +3% per phase cycle (4 waves), hard-capped at 1.35x base.
     // No per-wave jitter (removed index % 4) so speed never randomly jumps.
@@ -260,7 +260,7 @@ function createWaveConfig(index) {
 
 function generateWaveConfigs() {
     const waves = [];
-    for (let i = 0; i < 24; i++) {
+    for (let i = 0; i < 49; i++) {
         // Wave 10 (index 9) is the Splitter Boss wave — overridden below
         if (i === 9) {
             const defaultWave10 = createWaveConfig(i);
@@ -279,23 +279,42 @@ function generateWaveConfigs() {
             });
             continue;
         }
+
+        // Wave 30 (index 29) is a miniboss wave before the final gauntlet.
+        if (i === 29) {
+            waves.push({
+                title: 'WAVE 30: CORE WARDEN',
+                targetKills: 0,
+                enemySpeed: 0,
+                spawnThreshold: 0,
+                enemyColor: 0xff0055,
+                enemyTypes: [0xff0055],
+                description: 'A hardened guardian emerges with supporting elites. Defeat the warden.',
+                powerOptions: getRandomPowerOptions(29),
+                bossWave: true,
+                bossMaxHp: 95,
+                bossColor: 0xff0055
+            });
+            continue;
+        }
+
         waves.push(createWaveConfig(i));
     }
+
     waves.push({
-        title: 'WAVE 25: CORE OVERLOAD',
+        title: 'WAVE 50: OVERLORD ASCENDANT',
         targetKills: 0,
         enemySpeed: 0,
         spawnThreshold: 0,
-        enemyColor: 0xff0000,
-        enemyTypes: [0xff0000],
-        description: 'The system core has awakened. Dodge its projectiles and defeat the boss.',
-        powerOptions: getRandomPowerOptions(24),
+        enemyColor: 0x7700ff,
+        enemyTypes: [0x7700ff],
+        description: 'The final major boss awakens. End the corruption or fall.',
+        powerOptions: getRandomPowerOptions(49),
         bossWave: true,
-        bossMaxHp: 70,
-        bossColor: 0xff0000
+        bossMaxHp: 170,
+        bossColor: 0x7700ff
     });
-    // Wave 26: a final normal wave after the boss, so the game does not end immediately.
-    waves.push(createWaveConfig(25));
+
     return waves;
 }
 

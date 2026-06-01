@@ -317,6 +317,11 @@
     <!-- Fusion Modal -->
     <div id="fusion-modal" class="relic-modal hidden">
         <div class="relic-modal-content fusion-modal-content">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+                <button onclick="fusionPrevRecipe()" style="background:rgba(255,68,68,0.2);border-color:#ff4444;color:#ff4444;font-size:24px;padding:8px 12px;cursor:pointer;" id="fusion-prev-btn">◀</button>
+                <div id="fusion-recipe-counter" style="color:#ffaaaa;font-size:14px;font-weight:bold;">1 / 1</div>
+                <button onclick="fusionNextRecipe()" style="background:rgba(255,68,68,0.2);border-color:#ff4444;color:#ff4444;font-size:24px;padding:8px 12px;cursor:pointer;" id="fusion-next-btn">▶</button>
+            </div>
             <div id="fusion-icon" class="modal-icon" style="font-size:72px;">⚗️</div>
             <h2 id="fusion-title" style="color:#ff4444;text-shadow:0 0 20px #ff4444;margin:0 0 8px 0;letter-spacing:2px;">FUSION AVAILABLE</h2>
             <div id="fusion-ingredients" style="font-size:18px;color:#ffaaaa;margin-bottom:14px;letter-spacing:1px;"></div>

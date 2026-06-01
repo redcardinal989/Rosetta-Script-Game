@@ -371,6 +371,18 @@ button small {
         opacity: 1;
     }
 }
+
+@keyframes fadeOutScale {
+    0% {
+        opacity: 1;
+        transform: translate(-50%, -50%) scale(1);
+    }
+    100% {
+        opacity: 0;
+        transform: translate(-50%, -50%) scale(1.5);
+    }
+}
+
 /* ===== HEART HEALTH BAR ===== */
 #hearts-container {
     display: flex;
@@ -1138,7 +1150,7 @@ button small {
 /* ===== RELIC DRAFT (grace screen pick system) ===== */
 .grace-relic-draft {
     width: 100%;
-    max-width: 720px;
+    max-width: 100%;
     margin: 14px auto 0;
 }
 
@@ -1146,7 +1158,7 @@ button small {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 10px;
+    margin-bottom: 12px;
     padding: 0 4px;
 }
 
@@ -1164,105 +1176,115 @@ button small {
     color: #888;
 }
 
-.relic-draft-cards {
-    display: flex;
-    flex-wrap: wrap;
+.relic-draft-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
     gap: 10px;
-    justify-content: center;
+    width: 100%;
 }
 
-.relic-draft-card {
-    background: rgba(0, 0, 0, 0.75);
-    border: 2px solid #fff;
-    border-radius: 8px;
-    padding: 12px 14px;
-    width: 178px;
+.relic-grid-card {
+    background: rgba(0, 0, 0, 0.7);
+    border: 2px solid var(--relic-glow, #ffffff);
+    border-radius: 6px;
+    padding: 10px;
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 5px;
+    gap: 4px;
     transition: transform 0.12s, box-shadow 0.12s;
     cursor: default;
+    position: relative;
+    min-height: 120px;
 }
 
-.relic-draft-card:not(.relic-draft-disabled):hover {
-    transform: translateY(-3px);
+.relic-grid-card:not(.relic-grid-disabled):hover {
+    transform: translateY(-2px);
+    box-shadow: 0 0 12px var(--relic-glow, #ffffff);
 }
 
-.relic-draft-disabled {
-    opacity: 0.45;
-    filter: grayscale(60%);
+.relic-grid-disabled {
+    opacity: 0.4;
+    filter: grayscale(70%);
+    cursor: not-allowed;
 }
 
-.relic-draft-icon {
-    font-size: 36px;
+.relic-grid-icon {
+    font-size: 32px;
     line-height: 1;
 }
 
-.relic-draft-name {
+.relic-grid-name {
     font-family: 'VT323', monospace;
-    font-size: 17px;
+    font-size: 14px;
     color: #fff;
     text-align: center;
     letter-spacing: 0.5px;
+    line-height: 1.2;
 }
 
-.relic-draft-desc {
+.relic-grid-stack-badge {
     font-family: 'VT323', monospace;
-    font-size: 13px;
-    color: #aaa;
-    text-align: center;
-    line-height: 1.3;
-    flex: 1;
+    font-size: 11px;
+    color: #ffcc00;
+    background: rgba(255, 204, 0, 0.2);
+    padding: 2px 4px;
+    border-radius: 3px;
+    font-weight: bold;
 }
 
-.relic-draft-locked {
-    font-family: 'VT323', monospace;
-    font-size: 13px;
-    color: #ff4444;
-    text-align: center;
-    margin-top: 4px;
-}
-
-.relic-draft-actions {
+.relic-grid-buttons {
     display: flex;
-    gap: 6px;
-    margin-top: 6px;
-    width: 100%;
-    justify-content: center;
+    gap: 4px;
+    margin-top: auto;
 }
 
-.relic-draft-take {
-    font-family: 'VT323', monospace !important;
-    font-size: 15px !important;
-    padding: 4px 10px !important;
-    background: linear-gradient(135deg, #00ff99, #00cc77) !important;
-    color: #000 !important;
-    border: 2px solid #00ff99 !important;
-    border-radius: 4px;
+.relic-grid-take,
+.relic-grid-leave {
+    font-family: 'VT323', monospace;
+    font-size: 13px;
+    padding: 4px 8px;
+    border-radius: 3px;
     cursor: pointer;
     transition: filter 0.1s;
-    margin-top: 0 !important;
+    border: 1px solid;
 }
 
-.relic-draft-take:hover {
-    filter: brightness(1.2);
-    background: #fff !important;
+.relic-grid-take {
+    background: #00ff99;
+    color: #000;
+    border-color: #00ff99;
 }
 
-.relic-draft-leave {
-    font-family: 'VT323', monospace !important;
-    font-size: 15px !important;
-    padding: 4px 10px !important;
-    background: transparent !important;
-    color: #ff4444 !important;
-    border: 2px solid #ff4444 !important;
-    border-radius: 4px;
-    cursor: pointer;
-    transition: filter 0.1s;
-    margin-top: 0 !important;
-}
-
-.relic-draft-leave:hover {
+.relic-grid-take:hover {
     filter: brightness(1.3);
 }
+
+.relic-grid-leave {
+    background: transparent;
+    color: #ff4444;
+    border-color: #ff4444;
+}
+
+.relic-grid-leave:hover {
+    filter: brightness(1.3);
+}
+
+.relic-grid-disabled-msg {
+    font-family: 'VT323', monospace;
+    font-size: 11px;
+    color: #ff8888;
+    text-align: center;
+    margin-top: auto;
+}
+
+.relic-grid-desc {
+    font-family: 'VT323', monospace;
+    font-size: 11px;
+    color: #aaa;
+    text-align: center;
+    line-height: 1.2;
+    margin-top: 4px;
+    display: none;
+}
+

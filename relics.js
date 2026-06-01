@@ -295,12 +295,31 @@ function checkFusionAvailable(playerRelics) {
 }
 
 /**
+ * Get all available fusion recipes where the player has the required components.
+ * @param {object[]} playerRelics – scene.player.relics array
+ * @returns {object[]} array of matching recipes
+ */
+function checkAllFusionsAvailable(playerRelics) {
+    const ownedIds = playerRelics.map(r => r.id);
+    const available = [];
+
+    for (const recipe of fusionRecipes) {
+        const canFuse = recipe.requires.every(reqId =>
+            ownedIds.includes(reqId)
+        );
+        if (canFuse) available.push(recipe);
+    }
+    return available;
+}
+
+/**
  * Flushes all player combat and weapon attributes back to baseline definitions, 
  * then loops through remaining inventory elements to rebuild calculations precisely.
  * Ensures dropping or consumption removes effects instantly.
  *
  * @param {Phaser.Scene} scene - Context reference to active game layout
  */
+
 function recalculatePlayerStats(scene) {
     if (!scene || !scene.player) return;
 

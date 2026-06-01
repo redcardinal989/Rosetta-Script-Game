@@ -4,6 +4,7 @@ let pausedScene = null; // Track paused scene for relic modal
 let _sfxVolume = 0.7;
 let _graceMusicVolume = 0.5;
 let _ambienceVolume = 0.35;
+const MAX_FUSED_RELICS = 3;
 
 function formatVolumePercent(value) {
     return `${Math.round(value * 100)}%`;
@@ -293,6 +294,8 @@ function generateWaveConfigs() {
         bossMaxHp: 70,
         bossColor: 0xff0000
     });
+    // Wave 26: a final normal wave after the boss, so the game does not end immediately.
+    waves.push(createWaveConfig(25));
     return waves;
 }
 
@@ -2687,6 +2690,9 @@ function closeRelicModal() { acceptRelic(); }
  * (pausedScene is set). The player can accept or decline the fusion.
  */
 function getFusionRewardChoices(scene) {
+    if ((scene.player.fusedRelics || []).length >= MAX_FUSED_RELICS) {
+        return [];
+    }
     const choices = fusionRecipes
         .map(recipe => recipe.result)
         .filter(result => {
@@ -2720,6 +2726,38 @@ function acceptFusionReward(index) {
     const option = scene._fusionRewardOptions[index];
     if (!option) return;
 
+    if ((scene.player.fusedRelics || []).length >= MAX_FUSED_RELICS) {
+        // Show red X overlay on the clicked card
+        const container = document.getElementById('fusion-reward-options');
+        const cards = container ? container.querySelectorAll('.fusion-reward-card') : [];
+        if (cards[index]) {
+            const card = cards[index];
+            const overlay = document.createElement('div');
+            overlay.style.cssText = `
+                position: absolute;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                font-size: 80px;
+                color: #ff3333;
+                pointer-events: none;
+                font-weight: bold;
+                animation: fadeOutScale 0.6s ease-out forwards;
+                z-index: 9999;
+            `;
+            overlay.innerText = '✕';
+            card.style.position = 'relative';
+            card.appendChild(overlay);
+            setTimeout(() => overlay.remove(), 600);
+        }
+        if (typeof scene._showWaveAlert === 'function') {
+            scene._showWaveAlert('⚗️ Fusion relic capacity reached', '#ffcc66');
+        }
+        scene._fusionRewardOptions = null;
+        document.getElementById('fusion-reward-modal').classList.add('hidden');
+        return;
+    }
+
     const reward = { ...option };
     scene.player.fusedRelics.push(reward);
     recalculatePlayerStats(scene);
@@ -2743,7 +2781,13 @@ function declineFusionReward() {
     if (modal) modal.classList.add('hidden');
 }
 
-function showFusionModal(recipe, scene) {
+let _fusionRecipesAvailable = [];
+let _fusionRecipeIndex = 0;
+
+function _displayFusionRecipe(index) {
+    if (_fusionRecipesAvailable.length === 0) return;
+    _fusionRecipeIndex = Math.max(0, Math.min(index, _fusionRecipesAvailable.length - 1));
+    const recipe = _fusionRecipesAvailable[_fusionRecipeIndex];
     const fused = recipe.result;
     const isAegis = fused.id === 'aegis_core';
     const modal = document.getElementById('fusion-modal');
@@ -2771,9 +2815,38 @@ function showFusionModal(recipe, scene) {
         resultNote.style.display = 'none';
     }
 
+    // Update counter
+    const counter = document.getElementById('fusion-recipe-counter');
+    if (counter) counter.innerText = `${_fusionRecipeIndex + 1} / ${_fusionRecipesAvailable.length}`;
+
+    // Update arrow buttons
+    const prevBtn = document.getElementById('fusion-prev-btn');
+    const nextBtn = document.getElementById('fusion-next-btn');
+    if (prevBtn) prevBtn.style.opacity = _fusionRecipeIndex === 0 ? '0.4' : '1';
+    if (nextBtn) nextBtn.style.opacity = _fusionRecipeIndex === _fusionRecipesAvailable.length - 1 ? '0.4' : '1';
+
     // Store recipe on modal for accept/decline
     document.getElementById('fusion-modal')._pendingRecipe = recipe;
-    document.getElementById('fusion-modal').classList.remove('hidden');
+}
+
+function fusionNextRecipe() {
+    if (_fusionRecipeIndex < _fusionRecipesAvailable.length - 1) {
+        _displayFusionRecipe(_fusionRecipeIndex + 1);
+    }
+}
+
+function fusionPrevRecipe() {
+    if (_fusionRecipeIndex > 0) {
+        _displayFusionRecipe(_fusionRecipeIndex - 1);
+    }
+}
+
+function showFusionModal(recipe, scene) {
+    _fusionRecipesAvailable = checkAllFusionsAvailable(scene.player.relics);
+    _fusionRecipeIndex = 0;
+    const modal = document.getElementById('fusion-modal');
+    modal.classList.remove('hidden');
+    _displayFusionRecipe(0);
     playFusionSound();
 }
 
@@ -2838,6 +2911,18 @@ function acceptFusion() {
         _graceScene._graceFusionPending = false;
         if (recipe) {
             const scene = _graceScene;
+            
+            // Check fusion relic cap
+            if ((scene.player.fusedRelics || []).length >= MAX_FUSED_RELICS) {
+                if (typeof scene._showWaveAlert === 'function') {
+                    scene._showWaveAlert('⚗️ Fusion relic capacity reached', '#ffcc66');
+                }
+                setFusionResultMessage('⚗️ Fusion relic capacity reached. Cannot craft another fusion relic.', false);
+                const btn = document.getElementById('grace-fusion-btn');
+                if (btn) { btn.classList.add('hidden'); btn._recipe = null; }
+                return;
+            }
+            
             const failed = fusionDidFail();
             removeFusionIngredients(scene, recipe);
             if (failed) {
@@ -2864,6 +2949,16 @@ function acceptFusion() {
     // Fallback mid-game fusion (safety path -- normally only grace screen triggers fusion)
     if (recipe && pausedScene) {
         const scene = pausedScene;
+        
+        // Check fusion relic cap
+        if ((scene.player.fusedRelics || []).length >= MAX_FUSED_RELICS) {
+            if (typeof scene._showWaveAlert === 'function') {
+                scene._showWaveAlert('⚗️ Fusion relic capacity reached', '#ffcc66');
+            }
+            setFusionResultMessage('⚗️ Fusion relic capacity reached. Cannot craft another fusion relic.', false);
+            return;
+        }
+        
         const failed = fusionDidFail();
         removeFusionIngredients(scene, recipe);
         if (failed) {
@@ -2954,7 +3049,7 @@ function openRelicInventory() {
         if (fusedRelics.length > 0) {
             const header = document.createElement('div');
             header.style.cssText = 'grid-column:1/-1;color:#ff6666;font-size:13px;text-transform:uppercase;letter-spacing:1px;margin:8px 0 2px;';
-            header.innerText = `⚗️ Fused Relics (${fusedRelics.length}/2)`;
+            header.innerText = `⚗️ Fused Relics (${fusedRelics.length}/${MAX_FUSED_RELICS})`;
             grid.appendChild(header);
             fusedRelics.forEach(relic => grid.appendChild(makeRelicCard(relic, true)));
         }
@@ -3172,24 +3267,36 @@ function showGracePeriod(scene) {
         <div class="grace-stat"><span class="grace-stat-label">SHIELDS</span><span class="grace-stat-value">${player.shieldCharges || 0}</span></div>
     `;
 
-    // Show fusion button if a recipe is available and not yet at stack cap
+    // Show fusion button if a recipe is available and not yet at stack cap or global cap
     const fusionBtn = document.getElementById('grace-fusion-btn');
     const fusionNote = document.getElementById('grace-fusion-note');
     const fusionStatus = document.getElementById('grace-fusion-status');
     if (fusionBtn) {
-        const recipe = checkFusionAvailable(player.relics);
-        const canFuse = recipe && (player.fusedRelics.filter(r => r.id === recipe.result.id).length < (recipe.result.maxStack || 2));
-        if (canFuse) {
-            fusionBtn.classList.remove('hidden');
-            fusionBtn._recipe = recipe;
-            if (fusionNote) {
-                fusionNote.style.display = 'block';
-                fusionNote.innerText = '⚠️ 5-10% chance to fail and destroy all ingredients when attempting this fusion.';
-            }
-        } else {
+        // Check if global fusion relic cap is reached
+        if ((player.fusedRelics || []).length >= MAX_FUSED_RELICS) {
             fusionBtn.classList.add('hidden');
             fusionBtn._recipe = null;
-            if (fusionNote) fusionNote.style.display = 'none';
+            if (fusionNote) {
+                fusionNote.style.display = 'block';
+                fusionNote.innerText = '⚗️ Fusion relic capacity reached (max 3)';
+            }
+        } else {
+            const availableRecipes = checkAllFusionsAvailable(player.relics);
+            const fusableRecipes = availableRecipes.filter(recipe =>
+                player.fusedRelics.filter(r => r.id === recipe.result.id).length < (recipe.result.maxStack || 2)
+            );
+            if (fusableRecipes.length > 0) {
+                fusionBtn.classList.remove('hidden');
+                fusionBtn._recipe = fusableRecipes[0];
+                if (fusionNote) {
+                    fusionNote.style.display = 'block';
+                    fusionNote.innerText = `⚠️ ${fusableRecipes.length} fusion${fusableRecipes.length > 1 ? 's' : ''} available (5-10% fail chance)`;
+                }
+            } else {
+                fusionBtn.classList.add('hidden');
+                fusionBtn._recipe = null;
+                if (fusionNote) fusionNote.style.display = 'none';
+            }
         }
     }
     if (fusionStatus) {
@@ -3316,7 +3423,7 @@ function renderRelicDraft(scene) {
         <span class="relic-draft-title">⬇ RELICS FOUND</span>
         <span class="relic-draft-count">${pending.length} available</span>
     </div>
-    <div class="relic-draft-list">`;
+    <div class="relic-draft-grid">`;
 
     pending.forEach((relic, idx) => {
         const overCap = scene.player.relics.length + idx >= scene.relicCap;
@@ -3324,31 +3431,25 @@ function renderRelicDraft(scene) {
             ? (scene.player.relics.filter(r => r.id === relic.id).length >= relic.maxStack)
             : false;
         const disabled = overCap || atStack;
-        const disabledMsg = overCap ? `Full (${scene.player.relics.length}/${scene.relicCap})` : atStack ? `Max ${relic.maxStack}×` : '';
+        const disabledMsg = overCap ? `Full` : atStack ? `Max` : '';
 
         const currentStack = ownedCounts[relic.id] || 0;
         const stackBadge = currentStack > 0
-            ? `<span class="relic-draft-stack-badge">${currentStack + 1}×</span>`
+            ? `<span class="relic-grid-stack-badge">${currentStack + 1}×</span>`
             : '';
 
-        html += `<div class="relic-draft-row${disabled ? ' relic-draft-disabled' : ''}"
-            style="--relic-glow: ${relic.glowColor || '#ffffff'};"
-            onclick="toggleRelicDraftExpand(this, ${idx})"
-            data-expanded="false">
-            <div class="relic-draft-row-left">
-                <span class="relic-draft-row-icon">${relic.icon || '?'}</span>
-                <span class="relic-draft-row-name">${relic.name}</span>
-                ${stackBadge}
-                ${disabled ? `<span class="relic-draft-cap-msg">${disabledMsg}</span>` : ''}
-            </div>
-            <div class="relic-draft-row-right">
-                ${disabled ? '' : `
-                    <button class="relic-draft-take-sm" onclick="event.stopPropagation(); draftTakeRelic(${idx})">✔ TAKE</button>
-                    <button class="relic-draft-leave-sm" onclick="event.stopPropagation(); draftLeaveRelic(${idx})">✖</button>
-                `}
-                <span class="relic-draft-chevron">▼</span>
-            </div>
-            <div class="relic-draft-row-desc hidden">${relic.description}</div>
+        html += `<div class="relic-grid-card${disabled ? ' relic-grid-disabled' : ''}"
+            style="--relic-glow: ${relic.glowColor || '#ffffff'};">
+            <div class="relic-grid-icon">${relic.icon || '?'}</div>
+            <div class="relic-grid-name">${relic.name}</div>
+            ${stackBadge}
+            ${disabled ? `<div class="relic-grid-disabled-msg">${disabledMsg}</div>` : `
+                <div class="relic-grid-buttons">
+                    <button class="relic-grid-take" onclick="event.stopPropagation(); draftTakeRelic(${idx})">✔</button>
+                    <button class="relic-grid-leave" onclick="event.stopPropagation(); draftLeaveRelic(${idx})">✖</button>
+                </div>
+                <div class="relic-grid-desc">${relic.description}</div>
+            `}
         </div>`;
     });
 

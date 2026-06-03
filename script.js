@@ -212,9 +212,48 @@ const powerOptionVariants = {
     ]
 };
 
+const weaponRewardVariants = [
+    {
+        id: 'shard_launcher',
+        label: 'SHARD LAUNCHER',
+        detail: 'Arcing shard projectiles fly with each attack. Tier increases count and damage.',
+        icon: '🔹'
+    },
+    {
+        id: 'arc_bolt',
+        label: 'ARC BOLT',
+        detail: 'A fast piercing bolt fires toward the cursor. Tier increases damage and range.',
+        icon: '⚡'
+    },
+    {
+        id: 'plasma_orb',
+        label: 'PLASMA ORB',
+        detail: 'Launches a glowing orb that detonates on enemy hit. Tier increases pulse power.',
+        icon: '🟣'
+    },
+    {
+        id: 'rocket_swarm',
+        label: 'ROCKET SWARM',
+        detail: 'Fires explosive micro-rockets. Tier increases missile count and blast radius.',
+        icon: '🚀'
+    }
+];
+
+const mergeWeaponOption = {
+    id: 'merge_weapons',
+    label: 'ULTIMATE ARMAMENT',
+    detail: 'Merge all four maxed weapon systems into a single devastating arsenal. Sacrifice all relics and lock relic pickups forever.'
+};
+
 function getRandomPowerOptions(index) {
     const ids = Object.keys(powerOptionVariants);
     const chosen = [];
+    const shouldOfferWeapon = Math.random() < 0.10;
+
+    if (shouldOfferWeapon) {
+        const weapon = weaponRewardVariants[Phaser.Math.Between(0, weaponRewardVariants.length - 1)];
+        chosen.push(`weapon_${weapon.id}`);
+    }
 
     while (chosen.length < 3) {
         const pick = ids[Math.floor(Math.random() * ids.length)];
@@ -222,10 +261,86 @@ function getRandomPowerOptions(index) {
     }
 
     return chosen.map((id) => {
+        if (id.startsWith('weapon_')) {
+            const weaponId = id.slice(7);
+            const weapon = weaponRewardVariants.find(w => w.id === weaponId);
+            return {
+                id,
+                label: weapon ? weapon.label : 'AUX WEAPON',
+                detail: weapon ? weapon.detail : 'Unlock a new weapon system.'
+            };
+        }
+
         const variants = powerOptionVariants[id];
         const variant = variants[index % variants.length];
         return { id, label: variant.label, detail: variant.detail };
     });
+}
+
+function getWeaponTier(scene, weaponId) {
+    return (scene.player.weaponTiers && scene.player.weaponTiers[weaponId]) || 0;
+}
+
+function getAvailableWeaponForScene(scene) {
+    const choices = weaponRewardVariants.filter(w => getWeaponTier(scene, w.id) < 3);
+    if (choices.length === 0) return null;
+    return choices[Phaser.Math.Between(0, choices.length - 1)];
+}
+
+function hasAllWeaponsMaxed(scene) {
+    return weaponRewardVariants.every(w => getWeaponTier(scene, w.id) >= 3);
+}
+
+function getEvolveOptions(scene) {
+    const options = scene.currentWave.powerOptions.map(option => ({ ...option }));
+    if (scene.player.weaponMerged) {
+        const ids = Object.keys(powerOptionVariants);
+        return options.map(option => {
+            if (option.id && option.id.startsWith('weapon_')) {
+                const alt = ids[Phaser.Math.Between(0, ids.length - 1)];
+                const variant = powerOptionVariants[alt][0];
+                return { id: alt, label: variant.label, detail: variant.detail };
+            }
+            return option;
+        });
+    }
+
+    if (hasAllWeaponsMaxed(scene)) {
+        options[0] = mergeWeaponOption;
+        return options;
+    }
+
+    options.forEach((option, index) => {
+        if (option.id && option.id.startsWith('weapon_')) {
+            const weaponId = option.id.slice(7);
+            if (getWeaponTier(scene, weaponId) >= 3) {
+                const alternate = getAvailableWeaponForScene(scene);
+                if (alternate) {
+                    options[index] = {
+                        id: `weapon_${alternate.id}`,
+                        label: alternate.label,
+                        detail: `${alternate.detail} Pick it again to upgrade its tier.`
+                    };
+                } else {
+                    options[index] = mergeWeaponOption;
+                }
+            }
+        }
+    });
+
+    if (Math.random() < 0.10) {
+        const weapon = getAvailableWeaponForScene(scene);
+        if (weapon) {
+            const option = {
+                id: `weapon_${weapon.id}`,
+                label: weapon.label,
+                detail: `${weapon.detail} Pick it again to upgrade its tier.`
+            };
+            options[Phaser.Math.Between(0, options.length - 1)] = option;
+        }
+    }
+
+    return options;
 }
 
 function createWaveConfig(index) {
@@ -462,6 +577,9 @@ class GameScene extends Phaser.Scene {
         this.player.relics = [];       // Track collected relics
         this.player.fusedRelics = [];  // Track fused relics (max 2 per type)
         this.player.secretRelics = []; // Track secret relics (e.g. "It's So Cold It Burns")
+        this.player.weaponTiers = {};  // Track acquired weapon systems and their tier
+        this.player.weaponMerged = false;
+        this.player.noRelicPickup = false;
         this.player.hasDot = false;
         this.player.dotStacks = 0;
         // One-shot mode state (set by "It's So Cold It Burns")
@@ -518,6 +636,45 @@ class GameScene extends Phaser.Scene {
         this.physics.add.overlap(this.player, this.bossProjectiles, (p, bullet) => {
             bullet.destroy();
             this.takeDamage(2); // Boss hits hard — 2 hearts
+        });
+
+        this.playerProjectiles = this.physics.add.group();
+        this.physics.add.overlap(this.playerProjectiles, this.enemies, (proj, enemy) => {
+            if (!proj.active || !enemy.active) return;
+            const damage = proj._weaponDamage || 1.5;
+            enemy.hp = (enemy.hp || 1) - damage;
+            if (enemy.hp <= 0) {
+                if (shouldDropRelic()) {
+                    this.spawnRelic(enemy.x, enemy.y);
+                }
+                if (enemy._isBrute && enemy._hpLabel && enemy._hpLabel.active) enemy._hpLabel.destroy();
+                if (enemy._isSplitter && enemy._shotTimer) enemy._shotTimer.remove(false);
+                enemy.destroy();
+                score++;
+                this.waveKills++;
+                document.getElementById('killCount').innerText = score;
+                if (this._splitterBossWaveActive) {
+                    const remaining = this.enemies.getChildren().filter(e => e && e.active).length;
+                    document.getElementById('waveProgress').innerText = `${remaining} ENEMIES LEFT`;
+                    if (remaining === 0) {
+                        this._splitterBossWaveActive = false;
+                        if (this.splitterProjectiles) this.splitterProjectiles.clear(true, true);
+                        this.advanceWave();
+                    }
+                } else {
+                    document.getElementById('waveProgress').innerText = `${this.waveKills} / ${this.currentWave.targetKills}`;
+                    if (this.waveKills >= this.currentWave.targetKills) this.advanceWave();
+                }
+            } else {
+                const prevFill = enemy.fillColor;
+                if (enemy.setFillStyle) {
+                    enemy.setFillStyle(0xffffff);
+                    this.time.delayedCall(80, () => {
+                        if (enemy && enemy.active && enemy.setFillStyle) enemy.setFillStyle(prevFill);
+                    });
+                }
+            }
+            if (!proj._piercing) proj.destroy();
         });
 
         // 6. Wave System
@@ -713,6 +870,11 @@ class GameScene extends Phaser.Scene {
         arc.arc(this.player.x, this.player.y, this.currentWeapon.range, angle - this.currentWeapon.width / 2, angle + this.currentWeapon.width / 2);
         arc.strokePath();
 
+        // Auxiliary weapon projectiles
+        if (this.player.weaponTiers && Object.keys(this.player.weaponTiers).length > 0) {
+            this.fireAuxProjectiles(angle);
+        }
+
         // Particle burst — reduced count so rapid fire stays readable
         const particleColors = [0x4488ff, 0x7733ff, 0xaaddff, 0x9900ff, 0x00ccff];
         const particleCount = 8;
@@ -868,6 +1030,52 @@ class GameScene extends Phaser.Scene {
         // Cooldown
         this.time.delayedCall(this.currentWeapon.reload * this.player.reloadModifier, () => {
             this.canFire = true;
+        });
+    }
+
+    fireAuxProjectiles(angle) {
+        const tiers = this.player.weaponTiers || {};
+        const merged = this.player.weaponMerged;
+        const originX = this.player.x;
+        const originY = this.player.y;
+
+        if (merged) {
+            const proj = this.add.circle(originX, originY, 10, 0xffdd66, 1);
+            this.physics.add.existing(proj);
+            proj.body.setVelocity(Math.cos(angle) * 520, Math.sin(angle) * 520);
+            proj.body.setAllowGravity(false);
+            proj.body.setCircle(10);
+            proj._weaponDamage = 4.5;
+            proj._piercing = true;
+            proj.setDepth(5);
+            this.playerProjectiles.add(proj);
+            this.time.delayedCall(600, () => { if (proj && proj.active) proj.destroy(); });
+            return;
+        }
+
+        weaponRewardVariants.forEach((weapon) => {
+            const tier = tiers[weapon.id] || 0;
+            if (tier === 0) return;
+            const count = Math.min(1 + tier, 4);
+            const speed = 340 + tier * 40;
+            const baseDamage = 1.2 + tier * 0.5;
+            const spread = 0.18 + tier * 0.04;
+            for (let i = 0; i < count; i++) {
+                const offset = (i - (count - 1) / 2) * spread;
+                const projAngle = angle + offset;
+                const color = weapon.id === 'rocket_swarm' ? 0xff8844 : weapon.id === 'plasma_orb' ? 0x9966ff : weapon.id === 'arc_bolt' ? 0x66ccff : 0x88eeff;
+                const size = weapon.id === 'plasma_orb' ? 10 : 6;
+                const proj = this.add.circle(originX, originY, size, color, 0.95);
+                this.physics.add.existing(proj);
+                proj.body.setAllowGravity(false);
+                proj.body.setVelocity(Math.cos(projAngle) * speed, Math.sin(projAngle) * speed);
+                proj.body.setCircle(size);
+                proj._weaponDamage = baseDamage + (weapon.id === 'rocket_swarm' ? 0.5 : 0);
+                proj._piercing = weapon.id === 'arc_bolt';
+                proj.setDepth(5);
+                this.playerProjectiles.add(proj);
+                this.time.delayedCall(600 + tier * 80, () => { if (proj && proj.active) proj.destroy(); });
+            }
         });
     }
 
@@ -1366,6 +1574,11 @@ class GameScene extends Phaser.Scene {
 
         // Immediately destroy so overlap doesn't re-fire
         relicSprite.destroy();
+
+        if (this.player.noRelicPickup) {
+            this._showWaveAlert('Weapon merge blocks relic pickups.', '#ff9999');
+            return;
+        }
 
         // Hard cap: once the player holds the current relic capacity, extras are ignored
         if (this.player.relics.length >= this.relicCap) return;
@@ -2446,7 +2659,8 @@ class GameScene extends Phaser.Scene {
             document.getElementById('powerBtn3')
         ];
 
-        this.currentWave.powerOptions.forEach((option, index) => {
+        const evolveOptions = getEvolveOptions(this);
+        evolveOptions.forEach((option, index) => {
             const button = buttons[index];
             button.textContent = option.label;
             button.dataset.power = option.id;
@@ -2695,6 +2909,11 @@ function applyPowerUp(type) {
         scene.currentWeapon.range += 30;
     } else if (type === 'shield') {
         scene.player.shieldCharges += 1;
+    } else if (type === 'merge_weapons') {
+        applyWeaponMerge(scene);
+    } else if (type && type.startsWith('weapon_')) {
+        const weaponId = type.slice(7);
+        upgradeWeaponTier(scene, weaponId);
     }
 
     document.getElementById('levelUpScreen').classList.add('hidden');
@@ -2709,6 +2928,44 @@ function applyPowerUp(type) {
     if (scene.currentWave.bossWave) {
         scene.startBossWave();
     }
+}
+
+function upgradeWeaponTier(scene, weaponId) {
+    if (!scene.player.weaponTiers) scene.player.weaponTiers = {};
+    const currentTier = scene.player.weaponTiers[weaponId] || 0;
+    const nextTier = Math.min(3, currentTier + 1);
+    scene.player.weaponTiers[weaponId] = nextTier;
+
+    const weapon = weaponRewardVariants.find(w => w.id === weaponId);
+    const tierLabel = nextTier === 3 ? 'MAXED' : `Tier ${nextTier}`;
+    scene._showWaveAlert(
+        `${weapon ? weapon.icon : '⚙️'} ${weapon ? weapon.label : 'Weapon'} ${tierLabel} acquired!`,
+        '#00ff99'
+    );
+}
+
+function applyWeaponMerge(scene) {
+    scene.player.weaponMerged = true;
+    scene.player.noRelicPickup = true;
+    scene.player.weaponTiers = scene.player.weaponTiers || {};
+    weaponRewardVariants.forEach(w => scene.player.weaponTiers[w.id] = 3);
+
+    // Sacrifice all relics and cancel any pending relic queues
+    scene.player.relics = [];
+    scene.player.fusedRelics = [];
+    scene.player.secretRelics = [];
+    scene._pendingRelics = [];
+    scene._pendingRelic = null;
+    if (scene.updateRelicsDisplay) scene.updateRelicsDisplay();
+
+    scene.currentWeapon.range += 40;
+    scene.player.reloadModifier *= 0.88;
+
+    scene._showWaveAlert('⚡ ULTIMATE ARMAMENT ENGAGED — relic pickups disabled', '#ffcc00');
+}
+
+function getMergedWeaponEffectBonus(scene) {
+    return scene.player.weaponMerged ? 1.25 : 1;
 }
 
 function acceptRelic() {
@@ -3116,10 +3373,20 @@ function openRelicInventory() {
     grid.innerHTML = '';
 
     const allRelics = [...relics, ...fusedRelics, ...secretRelics];
+    const weaponTiers = scene.player.weaponTiers || {};
+    const weapons = weaponRewardVariants.map(w => ({ ...w, tier: weaponTiers[w.id] || 0 })).filter(w => w.tier > 0 || scene.player.weaponMerged);
 
-    if (allRelics.length === 0) {
-        grid.innerHTML = '<div class="inv-empty">No relics collected yet.<br>Defeat enemies to find them!</div>';
+    if (allRelics.length === 0 && weapons.length === 0) {
+        grid.innerHTML = '<div class="inv-empty">No relics or weapon systems collected yet.<br>Defeat enemies to find them!</div>';
     } else {
+        if (weapons.length > 0) {
+            const header = document.createElement('div');
+            header.style.cssText = 'grid-column:1/-1;color:#a0d8ff;font-size:13px;text-transform:uppercase;letter-spacing:1px;margin-bottom:2px;';
+            header.innerText = 'Weapon Systems';
+            grid.appendChild(header);
+            weapons.forEach(weapon => grid.appendChild(makeWeaponCard(weapon, scene.player.weaponMerged)));
+        }
+
         // Section header for normal relics
         if (relics.length > 0) {
             const header = document.createElement('div');
@@ -3172,6 +3439,27 @@ function makeRelicCard(relic, isFused, isSecret) {
         <button class="inv-discard-btn" title="Discard relic" onclick="event.stopPropagation(); confirmDiscardRelic('${relic.id}', ${isFused}, ${isSecret ? 'true' : 'false'})">🗑</button>
     `;
     card.addEventListener('click', () => openRelicDetailModal(relic));
+    return card;
+}
+
+function makeWeaponCard(weapon, isMerged) {
+    const card = document.createElement('div');
+    card.className = 'inv-relic-card';
+    card.title = 'Click for more info';
+    const tierLabel = isMerged ? 'Merged Ultimate' : `Tier ${weapon.tier}`;
+    const color = isMerged ? '#ffcc00' : '#66ccff';
+    card.style.borderColor = color;
+    card.style.boxShadow = `0 0 12px ${color}88`;
+    card.innerHTML = `
+        <span class="inv-relic-icon">${weapon.icon || '⚙️'}</span>
+        <div class="inv-relic-name">${weapon.label} <span style="color:#aadfff;font-size:11px;">${tierLabel}</span></div>
+        <div class="inv-relic-desc">${weapon.detail}</div>
+    `;
+    card.addEventListener('click', () => openRelicDetailModal({
+        icon: weapon.icon,
+        name: weapon.label,
+        description: `${weapon.detail} \n\nCurrent Tier: ${weapon.tier}${isMerged ? ' (Merged Ultimate)' : ''}`
+    }));
     return card;
 }
 

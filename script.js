@@ -451,7 +451,7 @@ class GameScene extends Phaser.Scene {
         this.load.audio('relicPickup', 'relicPickup.mp3');
         this.load.image('arena1', 'arena1.png');
         this.load.image('arena2', 'arena2.png');
-        this.load.image('arena3', 'arena3.png');
+        this.load.image('arena3', 'arena3.jpg');
         this.load.audio('downtime', 'downtime.mp3');
         this.load.audio('fusion', 'fusion.mp3');
         this.load.audio('ambience', 'ambience.mp3');

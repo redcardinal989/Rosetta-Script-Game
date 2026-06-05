@@ -259,7 +259,7 @@ const mergeWeaponOption = {
 function getRandomPowerOptions(index) {
     const ids = Object.keys(powerOptionVariants);
     const chosen = [];
-    const shouldOfferWeapon = Math.random() < 0.10;
+    const shouldOfferWeapon = Math.random() < 0.50;
 
     if (shouldOfferWeapon) {
         const weapon = weaponRewardVariants[Phaser.Math.Between(0, weaponRewardVariants.length - 1)];
@@ -3434,8 +3434,9 @@ function upgradeWeaponTier(scene, weaponId) {
 
     const weapon = weaponRewardVariants.find(w => w.id === weaponId);
     const tierLabel = nextTier === 3 ? 'MAXED' : `Tier ${nextTier}`;
+    const actionLabel = currentTier === 0 ? 'acquired at' : 'upgraded to';
     scene._showWaveAlert(
-        `${weapon ? weapon.icon : '⚙️'} ${weapon ? weapon.label : 'Weapon'} ${tierLabel} acquired!`,
+        `${weapon ? weapon.icon : '⚙️'} ${weapon ? weapon.label : 'Weapon'} ${actionLabel} ${tierLabel}!`,
         '#00ff99'
     );
 }

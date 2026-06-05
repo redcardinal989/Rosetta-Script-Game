@@ -4,6 +4,7 @@ let pausedScene = null; // Track paused scene for relic modal
 let _sfxVolume = 0.7;
 let _graceMusicVolume = 0.5;
 let _ambienceVolume = 0.35;
+let _shakeMultiplier = 0.25; // Screen shake intensity (0 = off, 1 = full)
 const MAX_FUSED_RELICS = 3;
 
 function formatVolumePercent(value) {
@@ -41,9 +42,18 @@ function setAmbienceVolume(value, syncSlider = true) {
     }
 }
 
+function setShakeMultiplier(value, syncSlider = true) {
+    _shakeMultiplier = Math.max(0, Math.min(1, Number(value)));
+    const label = document.getElementById('shakeLabel');
+    if (label) label.textContent = Math.round(_shakeMultiplier * 100) + '%';
+    const slider = document.getElementById('shakeSlider');
+    if (slider && syncSlider) slider.value = _shakeMultiplier;
+}
+
 window.handleSfxVolumeChange = setSfxVolume;
 window.handleGraceMusicVolumeChange = setGraceMusicVolume;
 window.handleAmbienceVolumeChange = setAmbienceVolume;
+window.handleShakeChange = setShakeMultiplier;
 window.toggleSettingsPanel = function() {
     const panel = document.getElementById('settings-panel');
     if (!panel) return;
@@ -78,6 +88,7 @@ document.addEventListener('DOMContentLoaded', () => {
         setSfxVolume(_sfxVolume, false);
         setGraceMusicVolume(_graceMusicVolume, false);
         setAmbienceVolume(_ambienceVolume, false);
+        setShakeMultiplier(_shakeMultiplier, false);
     } catch (e) {}
     // Close settings panel when clicking outside (use toggle to correctly resume scene)
     document.addEventListener('click', (e) => {
@@ -390,6 +401,44 @@ function generateWaveConfigs() {
                 powerOptions: getRandomPowerOptions(9),
                 bossWave: false,
                 splitterBossWave: true, // custom flag
+                bossMaxHp: 0
+            });
+            continue;
+        }
+
+        // Wave 25 (index 24) — second splitter boss wave, 7 splitters + commander
+        if (i === 24) {
+            const defaultWave25 = createWaveConfig(i);
+            waves.push({
+                title: 'WAVE 25: SPLITTER RESURGENCE',
+                targetKills: 0,
+                enemySpeed: Math.round(defaultWave25.enemySpeed * 1.3),
+                spawnThreshold: 0,
+                enemyColor: 0xffcc00,
+                enemyTypes: [0xffcc00],
+                description: 'The splitting machines return in greater numbers. A hardened commander leads them.',
+                powerOptions: getRandomPowerOptions(24),
+                bossWave: false,
+                splitterBossWave: true,
+                splitterBossCount: 7, // nerfed: exactly 7 splitters
+                bossMaxHp: 0
+            });
+            continue;
+        }
+
+        // Wave 35 (index 34) — Void Maw miniboss: suction + spit + invincible until 2 towers die
+        if (i === 34) {
+            waves.push({
+                title: 'WAVE 35: VOID MAW',
+                targetKills: 0,
+                enemySpeed: 0,
+                spawnThreshold: 0,
+                enemyColor: 0x9900ff,
+                enemyTypes: [0x9900ff],
+                description: 'A monstrous void entity emerges. Destroy its two guardian towers before you can harm it.',
+                powerOptions: getRandomPowerOptions(34),
+                bossWave: false,
+                voidMawWave: true,
                 bossMaxHp: 0
             });
             continue;
@@ -772,8 +821,8 @@ class GameScene extends Phaser.Scene {
             this.player._previousPhaseY = this.player.y;
         }
 
-        // Enemy Spawning (Random chance per frame) — disabled during splitter boss wave
-        if (!this.bossActive && !this.currentWave.bossWave && !this._splitterBossWaveActive && Phaser.Math.Between(0, 100) > this.currentWave.spawnThreshold) {
+        // Enemy Spawning (Random chance per frame) — disabled during splitter boss wave and void maw wave
+        if (!this.bossActive && !this.currentWave.bossWave && !this._splitterBossWaveActive && !this._voidMawWaveActive && Phaser.Math.Between(0, 100) > this.currentWave.spawnThreshold) {
             this.spawnEnemy();
         }
 
@@ -1022,6 +1071,47 @@ class GameScene extends Phaser.Scene {
                     this._damageMiniBoss(mb, dmg);
                 }
             });
+        }
+
+        // Void Maw wave: slash hits towers and the maw itself
+        if (this._voidMawWaveActive) {
+            // Hit towers
+            if (this._voidMawTowers) {
+                this._voidMawTowers.forEach(tower => {
+                    if (!tower || !tower.active) return;
+                    const dist = Phaser.Math.Distance.Between(this.player.x, this.player.y, tower.x, tower.y);
+                    const ang2 = Phaser.Math.Angle.Between(this.player.x, this.player.y, tower.x, tower.y);
+                    const diff = Math.abs(Phaser.Math.Angle.Wrap(angle - ang2));
+                    if (dist < this.currentWeapon.range + 20 && diff < this.currentWeapon.width / 2) {
+                        let dmg = 6 + (this.player.bonusDamage || 0);
+                        if (this._oneShotWavesLeft > 0) dmg = 99999;
+                        tower.hp -= dmg;
+                        // Flash tower
+                        tower.setFillStyle(0xffffff);
+                        this.time.delayedCall(100, () => { if (tower && tower.active) tower.setFillStyle(0x6600aa); });
+                        if (tower._hpLabel) tower._hpLabel.setText(`TOWER ${tower._towerIdx + 1}: ${Math.max(0, tower.hp)}`);
+                        if (tower.hp <= 0) {
+                            this._onVoidTowerDeath(tower);
+                            // Remove from towers array
+                            if (this._voidMawTowers) {
+                                const idx = this._voidMawTowers.indexOf(tower);
+                                if (idx !== -1) this._voidMawTowers.splice(idx, 1);
+                            }
+                        }
+                    }
+                });
+            }
+            // Hit the Void Maw itself
+            if (this._voidMaw && this._voidMaw.active) {
+                const mawDist = Phaser.Math.Distance.Between(this.player.x, this.player.y, this._voidMaw.x, this._voidMaw.y);
+                const mawAng = Phaser.Math.Angle.Between(this.player.x, this.player.y, this._voidMaw.x, this._voidMaw.y);
+                const mawDiff = Math.abs(Phaser.Math.Angle.Wrap(angle - mawAng));
+                if (mawDist < this.currentWeapon.range + 40 && mawDiff < this.currentWeapon.width / 2) {
+                    let dmg = 6 + (this.player.bonusDamage || 0);
+                    if (this._oneShotWavesLeft > 0) dmg = 99999;
+                    this._damageVoidMaw(dmg);
+                }
+            }
         }
 
         // Fade Slash — quick fade so stacked arcs don't linger
@@ -1327,7 +1417,7 @@ class GameScene extends Phaser.Scene {
                 onComplete: () => spark.destroy()
             });
         }
-        this.cameras.main.shake(300, 0.018);
+        this.cameras.main.shake(300, 0.018 * _shakeMultiplier);
     }
 
     spawnCryoBurstEnemy() {
@@ -1541,7 +1631,7 @@ class GameScene extends Phaser.Scene {
             });
 
             // Camera shake for weight
-            this.cameras.main.shake(180, 0.012);
+            this.cameras.main.shake(180, 0.012 * _shakeMultiplier);
 
             // If player is in range, deal 2 hearts
             const dist = Phaser.Math.Distance.Between(brute.x, brute.y, this.player.x, this.player.y);
@@ -1549,6 +1639,298 @@ class GameScene extends Phaser.Scene {
                 this.takeDamage(2);
             }
         });
+    }
+
+    // ── VOID MAW (Wave 35 Miniboss) ──────────────────────────────
+    // A colossal void entity. Sucks the player toward it, then spits them across
+    // the arena. Immune to damage until both guardian towers are destroyed.
+    _spawnVoidMaw() {
+        const { width, height } = this.scale;
+        const cx = width / 2;
+        const cy = height / 2;
+
+        // ── Show intro banner
+        this._showWaveAlert('👁 THE VOID MAW AWAKENS', '#9900ff');
+        this.time.delayedCall(1200, () => this._showWaveAlert('⚠ DESTROY BOTH TOWERS FIRST', '#ff4444'));
+
+        // ── Spawn the Void Maw body ────────────────────────────
+        const maw = this.add.circle(cx, cy, 48, 0x330066);
+        maw.setStrokeStyle(5, 0x9900ff);
+        maw.setDepth(4);
+        this.physics.add.existing(maw, true); // static body — it doesn't move
+        maw.isVoidMaw = true;
+        maw.maxHp = 200;
+        maw.hp = 200;
+        maw._invincible = true; // starts invincible until towers die
+        maw._towersAlive = 2;
+        this._voidMaw = maw;
+
+        // Inner void pupil
+        const pupil = this.add.circle(cx, cy, 20, 0x000000);
+        pupil.setStrokeStyle(3, 0xcc00ff);
+        pupil.setDepth(5);
+        maw._pupil = pupil;
+
+        // Pulsing aura
+        this.tweens.add({
+            targets: maw, scaleX: 1.1, scaleY: 1.1,
+            duration: 800, yoyo: true, loop: -1, ease: 'Sine.easeInOut'
+        });
+
+        // Floating HP label
+        const hpLabel = this.add.text(cx, cy - 66, `HP: ${maw.hp} | 🔒 TOWERS ALIVE: 2`,
+            { fontFamily: 'VT323', fontSize: '18px', color: '#cc88ff', stroke: '#000', strokeThickness: 3 });
+        hpLabel.setOrigin(0.5).setDepth(10);
+        maw._hpLabel = hpLabel;
+
+        // ── Spawn 2 guardian towers at opposite corners ────────
+        const towerPositions = [
+            { x: 120, y: 120 },
+            { x: width - 120, y: height - 120 }
+        ];
+        this._voidMawTowers = [];
+
+        towerPositions.forEach((pos, idx) => {
+            const tower = this.add.rectangle(pos.x, pos.y, 36, 36, 0x6600aa);
+            tower.setStrokeStyle(3, 0xcc00ff);
+            tower.setDepth(3);
+            this.physics.add.existing(tower, true);
+            this.enemies.add(tower);
+            tower.hp = 45;
+            tower.maxHp = 45;
+            tower._isVoidTower = true;
+            tower._towerIdx = idx;
+            tower._origColor = 0x6600aa;
+
+            // Tower HP label
+            const tLabel = this.add.text(pos.x, pos.y - 28, `TOWER ${idx + 1}: ${tower.hp}`,
+                { fontFamily: 'VT323', fontSize: '15px', color: '#cc88ff', stroke: '#000', strokeThickness: 3 });
+            tLabel.setOrigin(0.5).setDepth(10);
+            tower._hpLabel = tLabel;
+
+            // Tower glow pulse
+            this.tweens.add({
+                targets: tower, scaleX: 1.12, scaleY: 1.12,
+                duration: 600 + idx * 200, yoyo: true, loop: -1, ease: 'Sine.easeInOut'
+            });
+
+            // Tower fires aimed 3-shot bursts at the player every 2s
+            const towerTimer = this.time.addEvent({
+                delay: 1800 + idx * 400,
+                loop: true,
+                callback: () => {
+                    if (!tower || !tower.active || !this._voidMawWaveActive) return;
+                    this._voidTowerFireBurst(tower);
+                }
+            });
+            tower._atkTimer = towerTimer;
+
+            this._voidMawTowers.push(tower);
+        });
+
+        // ── Suction + Spit attack loop ─────────────────────────
+        // Every 6s the Maw sucks the player in for 2.5s then spits them away
+        this._voidMawAttackTimer = this.time.addEvent({
+            delay: 6000,
+            loop: true,
+            callback: () => {
+                if (!maw || !maw.active || !this._voidMawWaveActive) return;
+                this._voidMawSuckAndSpit(maw);
+            }
+        });
+
+        // ── Overlap: player touching maw body deals damage ────
+        this.physics.add.overlap(this.player, maw, () => {
+            if (!maw || !maw.active || !this._voidMawWaveActive) return;
+            if (!this._voidMawContactCooldown) {
+                this._voidMawContactCooldown = true;
+                this.takeDamage(1);
+                this.time.delayedCall(1000, () => { this._voidMawContactCooldown = false; });
+            }
+        });
+    }
+
+    _voidTowerFireBurst(tower) {
+        // Fire 3 spread shots aimed at the player
+        const baseAngle = Phaser.Math.Angle.Between(tower.x, tower.y, this.player.x, this.player.y);
+        const offsets = [-0.25, 0, 0.25];
+        offsets.forEach(off => {
+            const ang = baseAngle + off;
+            const proj = this.add.circle(tower.x, tower.y, 6, 0xcc00ff);
+            proj.setDepth(4);
+            this.physics.add.existing(proj);
+            proj.body.setVelocity(Math.cos(ang) * 240, Math.sin(ang) * 240);
+            proj.body.setAllowGravity(false);
+            // Use bossProjectiles group for overlap with player
+            this.bossProjectiles.add(proj);
+            // Auto-destroy after 3s
+            this.time.delayedCall(3000, () => { if (proj && proj.active) proj.destroy(); });
+        });
+    }
+
+    _voidMawSuckAndSpit(maw) {
+        if (!this.player || !this._voidMawWaveActive) return;
+
+        const SUCK_DURATION = 2500;
+        const SUCK_FORCE = 380;
+
+        // Visual warning: maw eye flashes
+        if (maw._pupil) {
+            this.tweens.add({
+                targets: maw._pupil, scaleX: 2.5, scaleY: 2.5, alpha: 0.4,
+                duration: 300, yoyo: true, repeat: 3
+            });
+        }
+        this._showWaveAlert('☠ VOID PULL!', '#cc00ff');
+
+        // Suction phase: pull player toward maw each tick
+        this._voidSucking = true;
+        const suckTicker = this.time.addEvent({
+            delay: 50,
+            loop: true,
+            callback: () => {
+                if (!this._voidSucking || !this.player || !maw.active) return;
+                const angle = Phaser.Math.Angle.Between(this.player.x, this.player.y, maw.x, maw.y);
+                const dist = Phaser.Math.Distance.Between(this.player.x, this.player.y, maw.x, maw.y);
+                // Pull harder when farther away
+                const pullStrength = Math.min(SUCK_FORCE, SUCK_FORCE * (dist / 120));
+                this.player.x += Math.cos(angle) * pullStrength * 0.05;
+                this.player.y += Math.sin(angle) * pullStrength * 0.05;
+                if (this.player.body) {
+                    try { this.player.body.reset(this.player.x, this.player.y); } catch(e) {}
+                }
+            }
+        });
+
+        // After suck duration, spit the player to a random edge
+        this.time.delayedCall(SUCK_DURATION, () => {
+            this._voidSucking = false;
+            suckTicker.remove(false);
+            if (!this.player || !this._voidMawWaveActive) return;
+
+            this._showWaveAlert('💥 VOID SPIT!', '#ff44ff');
+
+            // Deal 1 damage on spit
+            this.takeDamage(1);
+
+            // Camera shake on spit
+            this.cameras.main.shake(400, 0.022 * _shakeMultiplier);
+
+            // Launch player toward a random edge of the arena
+            const { width, height } = this.scale;
+            const edge = Phaser.Math.Between(0, 3);
+            let targetX, targetY;
+            if      (edge === 0) { targetX = Phaser.Math.Between(60, width - 60); targetY = 60; }
+            else if (edge === 1) { targetX = Phaser.Math.Between(60, width - 60); targetY = height - 60; }
+            else if (edge === 2) { targetX = 60; targetY = Phaser.Math.Between(60, height - 60); }
+            else                 { targetX = width - 60; targetY = Phaser.Math.Between(60, height - 60); }
+
+            // Tween player across the arena
+            this.tweens.add({
+                targets: this.player,
+                x: targetX, y: targetY,
+                duration: 350, ease: 'Power3',
+                onComplete: () => {
+                    if (this.player && this.player.body) {
+                        try { this.player.body.reset(this.player.x, this.player.y); } catch(e) {}
+                    }
+                }
+            });
+        });
+    }
+
+    // Called when a Void Tower is killed — unlocks Maw if both are gone
+    _onVoidTowerDeath(tower) {
+        if (tower._hpLabel) { tower._hpLabel.destroy(); tower._hpLabel = null; }
+        if (tower._atkTimer) { tower._atkTimer.remove(false); tower._atkTimer = null; }
+        tower.destroy();
+
+        const maw = this._voidMaw;
+        if (!maw) return;
+        maw._towersAlive = Math.max(0, (maw._towersAlive || 2) - 1);
+
+        if (maw._towersAlive <= 0 && maw._invincible) {
+            // Unlock the Maw
+            maw._invincible = false;
+            this._showWaveAlert('🔓 VOID MAW VULNERABLE!', '#00ff88');
+            // Make the maw visually "open" — change colors
+            maw.setFillStyle(0x660033);
+            maw.setStrokeStyle(5, 0xff00aa);
+            if (maw._pupil) maw._pupil.setFillStyle(0xff0066);
+            if (maw._hpLabel) maw._hpLabel.setText(`HP: ${maw.hp}`);
+            // Shake to signal the moment
+            this.cameras.main.shake(500, 0.03 * _shakeMultiplier);
+        } else if (maw._towersAlive > 0) {
+            this._showWaveAlert(`🔒 ${maw._towersAlive} TOWER${maw._towersAlive > 1 ? 'S' : ''} REMAINING`, '#ffaa00');
+            if (maw._hpLabel) maw._hpLabel.setText(`HP: ${maw.hp} | 🔒 TOWERS ALIVE: ${maw._towersAlive}`);
+        }
+    }
+
+    // Damage the Void Maw — respects invincibility
+    _damageVoidMaw(dmg) {
+        const maw = this._voidMaw;
+        if (!maw || !maw.active) return;
+        if (maw._invincible) {
+            // Show a "blocked" effect
+            this._showWaveAlert('🛡 TOWERS PROTECT IT!', '#ff4444');
+            return;
+        }
+        maw.hp -= dmg;
+        if (maw._hpLabel) maw._hpLabel.setText(`HP: ${maw.hp}`);
+
+        // Flash the maw
+        maw.setFillStyle(0xffffff);
+        this.time.delayedCall(120, () => { if (maw && maw.active) maw.setFillStyle(0x660033); });
+
+        if (maw.hp <= 0) {
+            this._voidMawDeath();
+        }
+    }
+
+    _voidMawDeath() {
+        const maw = this._voidMaw;
+        if (!maw) return;
+
+        // Stop suction
+        this._voidSucking = false;
+        if (this._voidMawAttackTimer) { this._voidMawAttackTimer.remove(false); this._voidMawAttackTimer = null; }
+
+        // Death explosion
+        const { width, height } = this.scale;
+        const colors = [0x9900ff, 0xcc00ff, 0xff00cc, 0xffffff, 0x6600aa];
+        for (let i = 0; i < 24; i++) {
+            const ang = (Math.PI * 2 / 24) * i;
+            const spark = this.add.circle(maw.x, maw.y, 8, colors[i % colors.length]);
+            spark.setDepth(8);
+            this.tweens.add({
+                targets: spark,
+                x: maw.x + Math.cos(ang) * 120, y: maw.y + Math.sin(ang) * 120,
+                alpha: 0, scaleX: 0.2, scaleY: 0.2,
+                duration: 800, ease: 'Power2',
+                onComplete: () => spark.destroy()
+            });
+        }
+        this.cameras.main.shake(600, 0.04 * _shakeMultiplier);
+
+        // Flash screen purple
+        const flash = this.add.rectangle(width / 2, height / 2, width, height, 0x9900ff, 0);
+        flash.setDepth(20);
+        this.tweens.add({ targets: flash, alpha: 0.6, duration: 100, yoyo: true, repeat: 4, onComplete: () => flash.destroy() });
+
+        const banner = this.add.text(width / 2, height / 2 - 60, '💀 VOID MAW SLAIN! 💀', {
+            fontFamily: 'VT323', fontSize: '48px', color: '#ff88ff',
+            stroke: '#000', strokeThickness: 5
+        });
+        banner.setOrigin(0.5).setDepth(25);
+        this.tweens.add({ targets: banner, alpha: 0, y: banner.y - 60, duration: 350, delay: 1600, onComplete: () => banner.destroy() });
+
+        if (maw._hpLabel) { maw._hpLabel.destroy(); maw._hpLabel = null; }
+        if (maw._pupil) { maw._pupil.destroy(); maw._pupil = null; }
+        maw.destroy();
+        this._voidMaw = null;
+
+        this._voidMawWaveActive = false;
+        this.time.delayedCall(1800, () => { this.advanceWave(); });
     }
 
     _showWaveAlert(msg, color) {
@@ -1606,6 +1988,15 @@ class GameScene extends Phaser.Scene {
         try { this.enemies.clear(true, true); } catch (e) { /* ignore if not present */ }
         try { if (this.splitterProjectiles) this.splitterProjectiles.clear(true, true); } catch (e) {}
 
+        // Clean up Void Maw if active
+        try {
+            if (this._voidMaw) { if (this._voidMaw._hpLabel) this._voidMaw._hpLabel.destroy(); if (this._voidMaw._pupil) this._voidMaw._pupil.destroy(); this._voidMaw.destroy(); this._voidMaw = null; }
+            if (this._voidMawTowers) { this._voidMawTowers.forEach(t => { if (t && t.active) { if (t._hpLabel) t._hpLabel.destroy(); if (t._atkTimer) t._atkTimer.remove(false); t.destroy(); } }); this._voidMawTowers = null; }
+            if (this._voidMawAttackTimer) { this._voidMawAttackTimer.remove(false); this._voidMawAttackTimer = null; }
+            this._voidSucking = false;
+            this._voidMawWaveActive = false;
+        } catch(e) {}
+
         // Reposition player to center
         const cx = this.scale.width / 2;
         const cy = this.scale.height / 2;
@@ -1623,15 +2014,16 @@ class GameScene extends Phaser.Scene {
         this.enemySpeedModifier = 0.65;
         this.time.delayedCall(4000, () => { this.enemySpeedModifier = 1; });
 
-        // WAVE 10: Splitter Boss Wave — lots of splitters + one slightly-fast brute commander
+        // WAVE 10 / WAVE 25: Splitter Boss Wave — lots of splitters + one slightly-fast brute commander
         if (this._pendingSplitterBossWave) {
             this._pendingSplitterBossWave = false;
             this._splitterBossWaveActive = true;
             this._splitterBossKillTarget = 0; // counted when brute dies
             this._showWaveAlert('⚠ SPLITTER HORDE INCOMING', '#ffcc00');
 
-            // Spawn 5-6 splitters staggered
-            const splitterCount = Phaser.Math.Between(5, 6);
+            // Spawn configurable splitter count (default 5-6, wave 25 uses 7)
+            const configCount = this.currentWave.splitterBossCount;
+            const splitterCount = configCount != null ? configCount : Phaser.Math.Between(5, 6);
             for (let i = 0; i < splitterCount; i++) {
                 this.time.delayedCall(400 + i * 600, () => {
                     const s = this.spawnSplitterEnemy();
@@ -1658,6 +2050,13 @@ class GameScene extends Phaser.Scene {
 
             // Wire advance: wave ends when the brute dies
             // (handled in the existing enemy kill code — we just count the kill)
+        }
+
+        // WAVE 35: Void Maw Wave — giant suction beast + 2 guardian towers
+        if (this._pendingVoidMawWave) {
+            this._pendingVoidMawWave = false;
+            this._voidMawWaveActive = true;
+            this._spawnVoidMaw();
         }
 
         // Splitter squad: 2-3 spawn at wave edges, each fires 2 slow projectiles
@@ -2497,18 +2896,23 @@ class GameScene extends Phaser.Scene {
             this._pendingSplitterBossWave = true;
         }
 
+        // Wave 35: Void Maw wave — handled entirely in resetAfterUpgrade
+        if (this.currentWave.voidMawWave) {
+            this._pendingVoidMawWave = true;
+        }
+
         // Every 6 waves: spawn a squad of 2-3 Splitter enemies at wave start
-        if (this.waveIndex > 0 && this.waveIndex % 6 === 0 && !this.currentWave.bossWave && !this.currentWave.splitterBossWave) {
+        if (this.waveIndex > 0 && this.waveIndex % 6 === 0 && !this.currentWave.bossWave && !this.currentWave.splitterBossWave && !this.currentWave.voidMawWave) {
             this._pendingSplitterSpawn = true; // spawned after grace ends in resetAfterUpgrade
         }
 
         // Every 3 waves (offset by 1): seed the wave with Cryo Burst enemies
-        if (this.waveIndex > 1 && (this.waveIndex + 1) % 3 === 0 && !this.currentWave.bossWave) {
+        if (this.waveIndex > 1 && (this.waveIndex + 1) % 3 === 0 && !this.currentWave.bossWave && !this.currentWave.voidMawWave) {
             this._pendingCryoBurstWave = true;
         }
 
         // After wave 10: spawn 1-2 Brutes each wave
-        if (this.waveIndex >= 10 && !this.currentWave.bossWave) {
+        if (this.waveIndex >= 10 && !this.currentWave.bossWave && !this.currentWave.voidMawWave) {
             this._pendingBruteSpawn = true;
         }
 
@@ -2595,7 +2999,7 @@ class GameScene extends Phaser.Scene {
     updateWaveUI() {
         document.getElementById('killCount').innerText = score;
         document.getElementById('waveNumber').innerText = this.currentWave.title;
-        document.getElementById('waveProgress').innerText = this.currentWave.bossWave ? 'BOSS FIGHT' : this.currentWave.splitterBossWave ? 'CLEAR ALL ENEMIES' : `${this.waveKills} / ${this.currentWave.targetKills}`;
+        document.getElementById('waveProgress').innerText = this.currentWave.bossWave ? 'BOSS FIGHT' : this.currentWave.splitterBossWave ? 'CLEAR ALL ENEMIES' : this.currentWave.voidMawWave ? 'DEFEAT THE VOID MAW' : `${this.waveKills} / ${this.currentWave.targetKills}`;
         document.getElementById('waveHint').innerText = this.currentWave.description;
         document.getElementById('bossHealthLabel').classList.toggle('hidden', !this.currentWave.bossWave);
         document.getElementById('boss-health-container').classList.toggle('hidden', !this.currentWave.bossWave);
@@ -2676,6 +3080,14 @@ class GameScene extends Phaser.Scene {
         if (this._defeatTriggered) return;
         this._defeatTriggered = true;
         this.inputLocked = true;
+
+        // Clean up Void Maw if active
+        try {
+            this._voidSucking = false;
+            if (this._voidMawAttackTimer) { this._voidMawAttackTimer.remove(false); this._voidMawAttackTimer = null; }
+            if (this._voidMaw) { if (this._voidMaw._hpLabel) this._voidMaw._hpLabel.destroy(); if (this._voidMaw._pupil) this._voidMaw._pupil.destroy(); this._voidMaw.destroy(); this._voidMaw = null; }
+            if (this._voidMawTowers) { this._voidMawTowers.forEach(t => { if (t && t.active) { if (t._hpLabel) t._hpLabel.destroy(); if (t._atkTimer) t._atkTimer.remove(false); t.destroy(); } }); this._voidMawTowers = null; }
+        } catch(e) {}
     
 
         // Stop any active music

@@ -288,12 +288,36 @@ function getRandomPowerOptions(index) {
     });
 }
 
+const weaponTierKillRequirements = [0, 10, 20, 30];
+
 function getWeaponTier(scene, weaponId) {
     return (scene.player.weaponTiers && scene.player.weaponTiers[weaponId]) || 0;
 }
 
+function getWeaponKillCount(scene, weaponId) {
+    return (scene.player.weaponKillCounts && scene.player.weaponKillCounts[weaponId]) || 0;
+}
+
+function getWeaponKillRequirementForNextTier(scene, weaponId) {
+    const currentTier = getWeaponTier(scene, weaponId);
+    return currentTier < 3 ? weaponTierKillRequirements[currentTier + 1] : null;
+}
+
+function isWeaponSelectableForScene(scene, weapon) {
+    const tier = getWeaponTier(scene, weapon.id);
+    if (tier === 3) return false;
+    if (tier === 0) return true;
+    const required = getWeaponKillRequirementForNextTier(scene, weapon.id);
+    return getWeaponKillCount(scene, weapon.id) >= required;
+}
+
+function resetWeaponKillCount(scene, weaponId) {
+    if (!scene.player.weaponKillCounts) scene.player.weaponKillCounts = {};
+    scene.player.weaponKillCounts[weaponId] = 0;
+}
+
 function getAvailableWeaponForScene(scene) {
-    const choices = weaponRewardVariants.filter(w => getWeaponTier(scene, w.id) < 3);
+    const choices = weaponRewardVariants.filter(w => isWeaponSelectableForScene(scene, w));
     if (choices.length === 0) return null;
     return choices[Phaser.Math.Between(0, choices.length - 1)];
 }
@@ -324,7 +348,10 @@ function getEvolveOptions(scene) {
     options.forEach((option, index) => {
         if (option.id && option.id.startsWith('weapon_')) {
             const weaponId = option.id.slice(7);
-            if (getWeaponTier(scene, weaponId) >= 3) {
+            const tier = getWeaponTier(scene, weaponId);
+            const weapon = weaponRewardVariants.find(w => w.id === weaponId);
+
+            if (tier >= 3) {
                 const alternate = getAvailableWeaponForScene(scene);
                 if (alternate) {
                     options[index] = {
@@ -335,6 +362,23 @@ function getEvolveOptions(scene) {
                 } else {
                     options[index] = mergeWeaponOption;
                 }
+                return;
+            }
+
+            if (tier > 0 && tier < 3) {
+                const required = getWeaponKillRequirementForNextTier(scene, weaponId);
+                if (!isWeaponSelectableForScene(scene, weapon)) {
+                    const alternate = getAvailableWeaponForScene(scene);
+                    if (alternate) {
+                        options[index] = {
+                            id: `weapon_${alternate.id}`,
+                            label: alternate.label,
+                            detail: `${alternate.detail} Pick it again to upgrade its tier.`
+                        };
+                        return;
+                    }
+                }
+                option.detail = `${weapon ? weapon.detail : option.detail} ${getWeaponKillCount(scene, weaponId)}/${required} kills to Tier ${tier + 1}.`;
             }
         }
     });
@@ -627,6 +671,7 @@ class GameScene extends Phaser.Scene {
         this.player.fusedRelics = [];  // Track fused relics (max 2 per type)
         this.player.secretRelics = []; // Track secret relics (e.g. "It's So Cold It Burns")
         this.player.weaponTiers = {};  // Track acquired weapon systems and their tier
+        this.player.weaponKillCounts = {}; // Track kills per weapon for upgrade requirements
         this.player.weaponMerged = false;
         this.player.noRelicPickup = false;
         this.player.hasDot = false;
@@ -698,6 +743,10 @@ class GameScene extends Phaser.Scene {
                 }
                 if (enemy._isBrute && enemy._hpLabel && enemy._hpLabel.active) enemy._hpLabel.destroy();
                 if (enemy._isSplitter && enemy._shotTimer) enemy._shotTimer.remove(false);
+                if (proj._weaponId) {
+                    this.player.weaponKillCounts = this.player.weaponKillCounts || {};
+                    this.player.weaponKillCounts[proj._weaponId] = (this.player.weaponKillCounts[proj._weaponId] || 0) + 1;
+                }
                 enemy.destroy();
                 score++;
                 this.waveKills++;
@@ -1130,16 +1179,17 @@ class GameScene extends Phaser.Scene {
         const originY = this.player.y;
 
         if (merged) {
-            const proj = this.add.circle(originX, originY, 10, 0xffdd66, 1);
-            this.physics.add.existing(proj);
-            proj.body.setVelocity(Math.cos(angle) * 520, Math.sin(angle) * 520);
-            proj.body.setAllowGravity(false);
-            proj.body.setCircle(10);
-            proj._weaponDamage = 4.5;
-            proj._piercing = true;
-            proj.setDepth(5);
-            this.playerProjectiles.add(proj);
-            this.time.delayedCall(600, () => { if (proj && proj.active) proj.destroy(); });
+            this._splitterFireShot({ x: originX, y: originY }, angle, {
+                absoluteAngle: true,
+                color: 0xffdd66,
+                size: 10,
+                speed: 520,
+                damage: 4.5,
+                piercing: true,
+                weaponId: 'merged',
+                group: this.playerProjectiles,
+                lifetime: 600
+            });
             return;
         }
 
@@ -1155,16 +1205,17 @@ class GameScene extends Phaser.Scene {
                 const projAngle = angle + offset;
                 const color = weapon.id === 'rocket_swarm' ? 0xff8844 : weapon.id === 'plasma_orb' ? 0x9966ff : weapon.id === 'arc_bolt' ? 0x66ccff : 0x88eeff;
                 const size = weapon.id === 'plasma_orb' ? 10 : 6;
-                const proj = this.add.circle(originX, originY, size, color, 0.95);
-                this.physics.add.existing(proj);
-                proj.body.setAllowGravity(false);
-                proj.body.setVelocity(Math.cos(projAngle) * speed, Math.sin(projAngle) * speed);
-                proj.body.setCircle(size);
-                proj._weaponDamage = baseDamage + (weapon.id === 'rocket_swarm' ? 0.5 : 0);
-                proj._piercing = weapon.id === 'arc_bolt';
-                proj.setDepth(5);
-                this.playerProjectiles.add(proj);
-                this.time.delayedCall(600 + tier * 80, () => { if (proj && proj.active) proj.destroy(); });
+                this._splitterFireShot({ x: originX, y: originY }, projAngle, {
+                    absoluteAngle: true,
+                    color,
+                    size,
+                    speed,
+                    damage: baseDamage + (weapon.id === 'rocket_swarm' ? 0.5 : 0),
+                    piercing: weapon.id === 'arc_bolt',
+                    weaponId: weapon.id,
+                    group: this.playerProjectiles,
+                    lifetime: 600 + tier * 80
+                });
             }
         });
     }
@@ -1363,18 +1414,37 @@ class GameScene extends Phaser.Scene {
         return splitter;
     }
 
-    _splitterFireShot(splitter, angleOffset) {
-        const baseAngle = Phaser.Math.Angle.Between(splitter.x, splitter.y, this.player.x, this.player.y);
-        const a = baseAngle + angleOffset;
-        const proj = this.add.circle(splitter.x, splitter.y, 5, 0xffee00);
-        proj.setStrokeStyle(1, 0xffffff);
-        this.splitterProjectiles.add(proj);
+    _splitterFireShot(shooter, angleOffset, options = {}) {
+        const originX = shooter.x || 0;
+        const originY = shooter.y || 0;
+        let a;
+
+        if (options.absoluteAngle) {
+            a = angleOffset;
+        } else {
+            const baseAngle = Phaser.Math.Angle.Between(originX, originY, this.player.x, this.player.y);
+            a = baseAngle + angleOffset;
+        }
+
+        const proj = this.add.circle(originX, originY, options.size || 5, options.color || 0xffee00, options.alpha ?? 1);
+        if (options.stroke) {
+            proj.setStrokeStyle(options.stroke.width, options.stroke.color);
+        }
+        const targetGroup = options.group || this.splitterProjectiles;
+        targetGroup.add(proj);
         this.physics.add.existing(proj);
         proj.body.setAllowGravity(false);
         proj.body.setCollideWorldBounds(true);
-        const spd = 185 + Phaser.Math.Between(0, 40); // deliberately slow
+        proj.body.setCircle(options.size || 5);
+
+        const spd = options.speed != null ? options.speed : 185 + Phaser.Math.Between(0, 40);
         proj.body.setVelocity(Math.cos(a) * spd, Math.sin(a) * spd);
-        this.time.delayedCall(5000, () => { if (proj && proj.active) proj.destroy(); });
+        proj._weaponDamage = options.damage || 1.5;
+        proj._piercing = !!options.piercing;
+        if (options.weaponId) proj._weaponId = options.weaponId;
+        proj.setDepth(options.depth || 5);
+
+        this.time.delayedCall(options.lifetime || 5000, () => { if (proj && proj.active) proj.destroy(); });
     }
 
     _spawnSplitterFragments(x, y) {
@@ -3346,7 +3416,21 @@ function upgradeWeaponTier(scene, weaponId) {
     if (!scene.player.weaponTiers) scene.player.weaponTiers = {};
     const currentTier = scene.player.weaponTiers[weaponId] || 0;
     const nextTier = Math.min(3, currentTier + 1);
+
+    if (currentTier > 0 && currentTier < 3) {
+        const required = getWeaponKillRequirementForNextTier(scene, weaponId);
+        if (getWeaponKillCount(scene, weaponId) < required) {
+            const weapon = weaponRewardVariants.find(w => w.id === weaponId);
+            scene._showWaveAlert(
+                `Need ${required} kills with ${weapon ? weapon.label : 'this weapon'} to reach Tier ${currentTier + 1}.`,
+                '#ff6666'
+            );
+            return;
+        }
+    }
+
     scene.player.weaponTiers[weaponId] = nextTier;
+    resetWeaponKillCount(scene, weaponId);
 
     const weapon = weaponRewardVariants.find(w => w.id === weaponId);
     const tierLabel = nextTier === 3 ? 'MAXED' : `Tier ${nextTier}`;

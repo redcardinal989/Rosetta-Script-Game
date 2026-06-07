@@ -449,7 +449,7 @@ function generateWaveConfigs() {
             });
             continue;
         }
-
+        
         // Wave 25 (index 24) — second splitter boss wave, 7 splitters + commander
         if (i === 24) {
             const defaultWave25 = createWaveConfig(i);
@@ -469,7 +469,23 @@ function generateWaveConfigs() {
             });
             continue;
         }
-
+        if (i === 14) {
+            waves.push({
+                title: 'WAVE 15: THE ECHO WRAITH',
+                targetKills: 0,
+                enemySpeed: 0,
+                spawnThreshold: 0,
+                enemyColor: 0x33aaff,
+                enemyTypes: [0x33aaff],
+                description: 'A nimble phantom entity emerges from the network. Defeat the Echo Wraith.',
+                powerOptions: getRandomPowerOptions(14),
+                bossWave: true,
+                echoWraithWave: true,
+                bossMaxHp: 100,
+                bossColor: 0x33aaff
+            });
+            continue;
+        }
         // Wave 35 (index 34) — Void Maw miniboss: suction + spit + invincible until 2 towers die
         if (i === 34) {
             waves.push({
@@ -500,7 +516,7 @@ function generateWaveConfigs() {
                 description: 'A hardened guardian emerges with supporting elites. Defeat the warden.',
                 powerOptions: getRandomPowerOptions(29),
                 bossWave: true,
-                bossMaxHp: 95,
+                bossMaxHp: 100,
                 bossColor: 0xff0055
             });
             continue;
@@ -733,47 +749,96 @@ class GameScene extends Phaser.Scene {
         });
 
         this.playerProjectiles = this.physics.add.group();
-        this.physics.add.overlap(this.playerProjectiles, this.enemies, (proj, enemy) => {
-            if (!proj.active || !enemy.active) return;
-            const damage = proj._weaponDamage || 1.5;
-            enemy.hp = (enemy.hp || 1) - damage;
-            if (enemy.hp <= 0) {
-                if (shouldDropRelic()) {
-                    this.spawnRelic(enemy.x, enemy.y);
-                }
-                if (enemy._isBrute && enemy._hpLabel && enemy._hpLabel.active) enemy._hpLabel.destroy();
-                if (enemy._isSplitter && enemy._shotTimer) enemy._shotTimer.remove(false);
-                if (proj._weaponId) {
-                    this.player.weaponKillCounts = this.player.weaponKillCounts || {};
-                    this.player.weaponKillCounts[proj._weaponId] = (this.player.weaponKillCounts[proj._weaponId] || 0) + 1;
-                }
-                enemy.destroy();
-                score++;
-                this.waveKills++;
-                document.getElementById('killCount').innerText = score;
-                if (this._splitterBossWaveActive) {
-                    const remaining = this.enemies.getChildren().filter(e => e && e.active).length;
-                    document.getElementById('waveProgress').innerText = `${remaining} ENEMIES LEFT`;
-                    if (remaining === 0) {
-                        this._splitterBossWaveActive = false;
-                        if (this.splitterProjectiles) this.splitterProjectiles.clear(true, true);
-                        this.advanceWave();
-                    }
-                } else {
-                    document.getElementById('waveProgress').innerText = `${this.waveKills} / ${this.currentWave.targetKills}`;
-                    if (this.waveKills >= this.currentWave.targetKills) this.advanceWave();
-                }
-            } else {
-                const prevFill = enemy.fillColor;
-                if (enemy.setFillStyle) {
-                    enemy.setFillStyle(0xffffff);
-                    this.time.delayedCall(80, () => {
-                        if (enemy && enemy.active && enemy.setFillStyle) enemy.setFillStyle(prevFill);
-                    });
-                }
+this.physics.add.overlap(this.playerProjectiles, this.enemies, (proj, enemy) => {
+    if (!proj.active || !enemy.active) return;
+    
+    // Safety check: skip if it's already a decoupled void asset
+    if (enemy._isVoidTower || enemy.isVoidMaw) {
+        return; 
+    }
+// Echo Wraith Projectile Hit Handler
+    
+    const damage = proj._weaponDamage || 1.5;
+    enemy.hp = (enemy.hp || 1) - damage;
+    // ... rest of your normal baseline standard enemy kill mechanics remain untouched
+
+    // FIX: Route damage explicitly if it's the Void Maw or its Towers
+    if (enemy.isVoidMaw) {
+        this._damageVoidMaw(damage);
+        if (!proj._piercing) proj.destroy();
+        return;
+    }
+    
+    if (enemy._isVoidTower) {
+        enemy.hp -= damage;
+        if (enemy.hp <= 0) {
+            if (proj._weaponId) {
+                this.player.weaponKillCounts = this.player.weaponKillCounts || {};
+                this.player.weaponKillCounts[proj._weaponId] = (this.player.weaponKillCounts[proj._weaponId] || 0) + 1;
             }
-            if (!proj._piercing) proj.destroy();
-        });
+            this._onVoidTowerDeath(enemy); // Properly call custom tower cleanup
+        } else {
+            // Flash white effect on hit
+            const prevFill = enemy.fillColor;
+            if (enemy.setFillStyle) {
+                enemy.setFillStyle(0xffffff);
+                this.time.delayedCall(80, () => {
+                    if (enemy && enemy.active && enemy.setFillStyle) enemy.setFillStyle(prevFill);
+                });
+            }
+        }
+        if (!proj._piercing) proj.destroy();
+        return;
+    }
+
+    // Standard baseline enemy behavior
+    enemy.hp = (enemy.hp || 1) - damage;
+    if (enemy.hp <= 0) {
+        if (shouldDropRelic()) {
+            this.spawnRelic(enemy.x, enemy.y);
+        }
+        if (enemy._isBrute && enemy._hpLabel && enemy._hpLabel.active) enemy._hpLabel.destroy();
+        if (enemy._isSplitter && enemy._shotTimer) enemy._shotTimer.remove(false);
+        if (proj._weaponId) {
+            this.player.weaponKillCounts = this.player.weaponKillCounts || {};
+            this.player.weaponKillCounts[proj._weaponId] = (this.player.weaponKillCounts[proj._weaponId] || 0) + 1;
+        }
+        enemy.destroy();
+        score++;
+        this.waveKills++;
+        document.getElementById('killCount').innerText = score;
+        
+        // Handle Splitter special wave
+        if (this._splitterBossWaveActive) {
+            const remaining = this.enemies.getChildren().filter(e => e && e.active).length;
+            document.getElementById('waveProgress').innerText = `${remaining} ENEMIES LEFT`;
+            if (remaining === 0) {
+                this._splitterBossWaveActive = false;
+                if (this.splitterProjectiles) this.splitterProjectiles.clear(true, true);
+                this.advanceWave();
+            }
+        } else if (this.currentWave.voidMawWave) {
+            // FIX: Prevent regular kill accumulation checks from advancing Void Maw phase
+            if (this._voidMaw) {
+                const towersText = this._voidMaw._towersAlive > 0 ? ` | 🔒 TOWERS ALIVE: ${this._voidMaw._towersAlive}` : ' | 🔓 VULNERABLE';
+                document.getElementById('waveProgress').innerText = `HP: ${this._voidMaw.hp}${towersText}`;
+            }
+        } else {
+            // Normal Wave progress check
+            document.getElementById('waveProgress').innerText = `${this.waveKills} / ${this.currentWave.targetKills}`;
+            if (this.waveKills >= this.currentWave.targetKills) this.advanceWave();
+        }
+    } else {
+        const prevFill = enemy.fillColor;
+        if (enemy.setFillStyle) {
+            enemy.setFillStyle(0xffffff);
+            this.time.delayedCall(80, () => {
+                if (enemy && enemy.active && enemy.setFillStyle) enemy.setFillStyle(prevFill);
+            });
+        }
+    }
+    if (!proj._piercing) proj.destroy();
+});
 
         // 6. Wave System
         this.waveIndex = 0;
@@ -1121,47 +1186,124 @@ class GameScene extends Phaser.Scene {
                 }
             });
         }
-
+if (this._activeBoss && this._activeBoss.isEchoWraith) {
+    const boss = this._activeBoss;
+    const dist = Phaser.Math.Distance.Between(this.player.x, this.player.y, boss.x, boss.y);
+    const ang2 = Phaser.Math.Angle.Between(this.player.x, this.player.y, boss.x, boss.y);
+    const diff = Math.abs(Phaser.Math.Angle.Wrap(angle - ang2)); // angle is pointer direction
+    
+    if (dist < this.currentWeapon.range + 20 && diff < this.currentWeapon.width / 2) {
+        let dmg = 6 + (this.player.bonusDamage || 0);
+        if (this._oneShotWavesLeft > 0) dmg = 99999;
+        
+        boss.hp -= dmg;
+        if (boss._hpLabel && boss._hpLabel.active) boss._hpLabel.setText(`HP: ${Math.max(0, Math.ceil(boss.hp))}`);
+        this.updateBossHealthUI();
+        
+        if (boss.hp <= 0) {
+            if (boss._dashTimer) boss._dashTimer.remove(false);
+            if (boss._attackTimer) boss._attackTimer.remove(false);
+            if (boss._hpLabel) boss._hpLabel.destroy();
+            this._activeBoss = null;
+            this.bossActive = false;
+            boss.destroy();
+            
+            this.waveKills++;
+            score += 500;
+            this.advanceWave();
+        } else {
+            // Flash on damage
+            const originalColor = boss.fillColor;
+            boss.fillColor = 0xffffff;
+            this.time.delayedCall(80, () => { if (boss && boss.active) boss.fillColor = originalColor; });
+        }
+    }
+}
+// Echo Wraith Slash Interface
+if (this._activeBoss && this._activeBoss.isEchoWraith) {
+    const boss = this._activeBoss;
+    const dist = Phaser.Math.Distance.Between(this.player.x, this.player.y, boss.x, boss.y);
+    const ang2 = Phaser.Math.Angle.Between(this.player.x, this.player.y, boss.x, boss.y);
+    const diff = Math.abs(Phaser.Math.Angle.Wrap(angle - ang2)); // angle is pointer crosshair direction
+    
+    if (dist < this.currentWeapon.range + 30 && diff < this.currentWeapon.width / 1.8) {
+        let dmg = 6 + (this.player.bonusDamage || 0);
+        if (this._oneShotWavesLeft > 0) dmg = 99999;
+        
+        boss.hp -= dmg;
+        if (boss._hpLabel && boss._hpLabel.active) {
+            boss._hpLabel.setText(`HP: ${Math.max(0, Math.ceil(boss.hp))}`);
+        }
+        this.updateBossHealthUI();
+        
+        if (boss.hp <= 0) {
+            if (boss._dashTimer) boss._dashTimer.remove(false);
+            if (boss._attackTimer) boss._attackTimer.remove(false);
+            if (boss._hpLabel) boss._hpLabel.destroy();
+            this._activeBoss = null;
+            this.bossActive = false;
+            boss.destroy();
+            
+            this.waveKills++;
+            score += 500;
+            this.advanceWave();
+        } else {
+            // Flash indicator on a valid hit
+            const originalColor = boss.fillColor;
+            boss.fillColor = 0xffffff;
+            this.time.delayedCall(80, () => { if (boss && boss.active) boss.fillColor = originalColor; });
+        }
+    }
+}
         // Void Maw wave: slash hits towers and the maw itself
-        if (this._voidMawWaveActive) {
-            // Hit towers
-            if (this._voidMawTowers) {
-                this._voidMawTowers.forEach(tower => {
-                    if (!tower || !tower.active) return;
-                    const dist = Phaser.Math.Distance.Between(this.player.x, this.player.y, tower.x, tower.y);
-                    const ang2 = Phaser.Math.Angle.Between(this.player.x, this.player.y, tower.x, tower.y);
-                    const diff = Math.abs(Phaser.Math.Angle.Wrap(angle - ang2));
-                    if (dist < this.currentWeapon.range + 20 && diff < this.currentWeapon.width / 2) {
-                        let dmg = 6 + (this.player.bonusDamage || 0);
-                        if (this._oneShotWavesLeft > 0) dmg = 99999;
-                        tower.hp -= dmg;
-                        // Flash tower
-                        tower.setFillStyle(0xffffff);
-                        this.time.delayedCall(100, () => { if (tower && tower.active) tower.setFillStyle(0x6600aa); });
-                        if (tower._hpLabel) tower._hpLabel.setText(`TOWER ${tower._towerIdx + 1}: ${Math.max(0, tower.hp)}`);
-                        if (tower.hp <= 0) {
-                            this._onVoidTowerDeath(tower);
-                            // Remove from towers array
-                            if (this._voidMawTowers) {
-                                const idx = this._voidMawTowers.indexOf(tower);
-                                if (idx !== -1) this._voidMawTowers.splice(idx, 1);
-                            }
-                        }
-                    }
-                });
-            }
-            // Hit the Void Maw itself
-            if (this._voidMaw && this._voidMaw.active) {
-                const mawDist = Phaser.Math.Distance.Between(this.player.x, this.player.y, this._voidMaw.x, this._voidMaw.y);
-                const mawAng = Phaser.Math.Angle.Between(this.player.x, this.player.y, this._voidMaw.x, this._voidMaw.y);
-                const mawDiff = Math.abs(Phaser.Math.Angle.Wrap(angle - mawAng));
-                if (mawDist < this.currentWeapon.range + 40 && mawDiff < this.currentWeapon.width / 2) {
-                    let dmg = 6 + (this.player.bonusDamage || 0);
-                    if (this._oneShotWavesLeft > 0) dmg = 99999;
-                    this._damageVoidMaw(dmg);
+       if (this._voidMawWaveActive) {
+    // Hit towers manually with slashes
+    if (this._voidMawTowers) {
+        this._voidMawTowers.forEach(tower => {
+            if (!tower || !tower.active) return;
+            const dist = Phaser.Math.Distance.Between(this.player.x, this.player.y, tower.x, tower.y);
+            const ang2 = Phaser.Math.Angle.Between(this.player.x, this.player.y, tower.x, tower.y);
+            const diff = Math.abs(Phaser.Math.Angle.Wrap(angle - ang2)); // 'angle' is your pointer direction
+            
+            if (dist < this.currentWeapon.range + 20 && diff < this.currentWeapon.width / 2) {
+                let dmg = 6 + (this.player.bonusDamage || 0);
+                if (this._oneShotWavesLeft > 0) dmg = 99999;
+                
+                tower.hp -= dmg;
+                
+                // Update floating text indicator above the tower if it exists
+                if (tower._hpLabel && tower._hpLabel.active) {
+                    tower._hpLabel.setText(`HP: ${Math.max(0, Math.ceil(tower.hp))}`);
+                }
+
+                if (tower.hp <= 0) {
+                    this._onVoidTowerDeath(tower);
+                } else {
+                    // Flash hit indicator
+                    const prevFill = tower.fillColor;
+                    tower.setFillStyle(0xffffff);
+                    this.time.delayedCall(80, () => {
+                        if (tower && tower.active) tower.setFillStyle(prevFill);
+                    });
                 }
             }
+        });
+    }
+
+    // Hit the main body of the Void Maw
+    const maw = this._voidMaw;
+    if (maw && maw.active && !maw._invincible) {
+        const dist = Phaser.Math.Distance.Between(this.player.x, this.player.y, maw.x, maw.y);
+        const ang2 = Phaser.Math.Angle.Between(this.player.x, this.player.y, maw.x, maw.y);
+        const diff = Math.abs(Phaser.Math.Angle.Wrap(angle - ang2));
+        
+        if (dist < this.currentWeapon.range + 40 && diff < this.currentWeapon.width / 1.8) {
+            let dmg = 6 + (this.player.bonusDamage || 0);
+            if (this._oneShotWavesLeft > 0) dmg = 99999;
+            this._damageVoidMaw(dmg);
         }
+    }
+}
 
         // Fade Slash — quick fade so stacked arcs don't linger
         this.tweens.add({ targets: arc, alpha: 0, duration: 120, onComplete: () => arc.destroy() });
@@ -1765,7 +1907,6 @@ class GameScene extends Phaser.Scene {
             tower.setStrokeStyle(3, 0xcc00ff);
             tower.setDepth(3);
             this.physics.add.existing(tower, true);
-            this.enemies.add(tower);
             tower.hp = 45;
             tower.maxHp = 45;
             tower._isVoidTower = true;
@@ -1938,71 +2079,72 @@ class GameScene extends Phaser.Scene {
 
     // Damage the Void Maw — respects invincibility
     _damageVoidMaw(dmg) {
-        const maw = this._voidMaw;
-        if (!maw || !maw.active) return;
-        if (maw._invincible) {
-            // Show a "blocked" effect
-            this._showWaveAlert('🛡 TOWERS PROTECT IT!', '#ff4444');
-            return;
-        }
-        maw.hp -= dmg;
-        if (maw._hpLabel) maw._hpLabel.setText(`HP: ${maw.hp}`);
-
-        // Flash the maw
-        maw.setFillStyle(0xffffff);
-        this.time.delayedCall(120, () => { if (maw && maw.active) maw.setFillStyle(0x660033); });
-
-        if (maw.hp <= 0) {
-            this._voidMawDeath();
-        }
+    const maw = this._voidMaw;
+    if (!maw || !maw.active) return;
+    
+    if (maw._invincible) {
+        // Show a "blocked" effect if towers are still up
+        this._showWaveAlert('🛡 TOWERS PROTECT IT!', '#ff4444');
+        return;
     }
+    
+    maw.hp = Math.max(0, maw.hp - dmg);
+    
+    if (maw._hpLabel) {
+        maw._hpLabel.setText(`HP: ${maw.hp}`);
+    }
+    document.getElementById('waveProgress').innerText = `HP: ${maw.hp} | 🔓 VULNERABLE`;
 
-    _voidMawDeath() {
-        const maw = this._voidMaw;
-        if (!maw) return;
-
-        // Stop suction
-        this._voidSucking = false;
-        if (this._voidMawAttackTimer) { this._voidMawAttackTimer.remove(false); this._voidMawAttackTimer = null; }
-
-        // Death explosion
+    if (maw.hp <= 0) {
+        // Play death sequencing/shake
+        this.cameras.main.shake(800, 0.04 * _shakeMultiplier);
+        
         const { width, height } = this.scale;
-        const colors = [0x9900ff, 0xcc00ff, 0xff00cc, 0xffffff, 0x6600aa];
-        for (let i = 0; i < 24; i++) {
-            const ang = (Math.PI * 2 / 24) * i;
-            const spark = this.add.circle(maw.x, maw.y, 8, colors[i % colors.length]);
-            spark.setDepth(8);
-            this.tweens.add({
-                targets: spark,
-                x: maw.x + Math.cos(ang) * 120, y: maw.y + Math.sin(ang) * 120,
-                alpha: 0, scaleX: 0.2, scaleY: 0.2,
-                duration: 800, ease: 'Power2',
-                onComplete: () => spark.destroy()
-            });
-        }
-        this.cameras.main.shake(600, 0.04 * _shakeMultiplier);
-
-        // Flash screen purple
-        const flash = this.add.rectangle(width / 2, height / 2, width, height, 0x9900ff, 0);
-        flash.setDepth(20);
-        this.tweens.add({ targets: flash, alpha: 0.6, duration: 100, yoyo: true, repeat: 4, onComplete: () => flash.destroy() });
-
-        const banner = this.add.text(width / 2, height / 2 - 60, '💀 VOID MAW SLAIN! 💀', {
-            fontFamily: 'VT323', fontSize: '48px', color: '#ff88ff',
-            stroke: '#000', strokeThickness: 5
+        const banner = this.add.text(width / 2, height / 2, 'VOID MAW PURGED', {
+            fontFamily: 'VT323',
+            fontSize: '44px',
+            color: '#00ff88',
+            stroke: '#000000',
+            strokeThickness: 5
         });
         banner.setOrigin(0.5).setDepth(25);
-        this.tweens.add({ targets: banner, alpha: 0, y: banner.y - 60, duration: 350, delay: 1600, onComplete: () => banner.destroy() });
+        
+        this.tweens.add({
+            targets: banner,
+            alpha: 0,
+            y: banner.y - 60,
+            duration: 350,
+            delay: 1600,
+            onComplete: () => banner.destroy()
+        });
+
+        // Thoroughly clear up internal intervals & references
+        if (this._voidMawAttackTimer) {
+            this._voidMawAttackTimer.remove(false);
+            this._voidMawAttackTimer = null;
+        }
+        this._voidSucking = false;
 
         if (maw._hpLabel) { maw._hpLabel.destroy(); maw._hpLabel = null; }
         if (maw._pupil) { maw._pupil.destroy(); maw._pupil = null; }
+        
         maw.destroy();
         this._voidMaw = null;
-
         this._voidMawWaveActive = false;
-        this.time.delayedCall(1800, () => { this.advanceWave(); });
-    }
 
+        // Transition securely out of Wave 35
+        this.time.delayedCall(1800, () => {
+            this.advanceWave();
+        });
+    } else {
+        // Flash white on successful hit
+        const prevFill = maw.fillColor;
+        maw.setFillStyle(0xffffff);
+        this.time.delayedCall(80, () => {
+            if (maw && maw.active) maw.setFillStyle(prevFill);
+        });
+    }
+}
     _showWaveAlert(msg, color) {
         const col = color || '#ffcc00';
         const { width, height } = this.scale;
@@ -2438,9 +2580,15 @@ class GameScene extends Phaser.Scene {
             if (this._bossPhase2Active) {
                 this._bossPhase2Count = (this._bossPhase2Count || 0) + 1;
                 if (this._bossPhase2Count >= 4) {
-                    // All 4 minibosses dead — victory
+                    // All 4 minibosses dead
                     this._endBossPhase2();
-                    this.showVictory();
+                    // Only trigger victory on the actual final wave (wave 50, index 49).
+                    // Any earlier boss wave (e.g. wave 30) just advances to the next wave.
+                    if (this.waveIndex >= waveConfigs.length - 1) {
+                        this.showVictory();
+                    } else {
+                        this.time.delayedCall(1200, () => { this.advanceWave(); });
+                    }
                 }
                 return;
             }
@@ -2676,7 +2824,13 @@ class GameScene extends Phaser.Scene {
 
         if (this._bossPhase2Count >= 4) {
             this._endBossPhase2();
-            this.showVictory();
+            // Only trigger victory on the actual final wave (wave 50, index 49).
+            // Any earlier boss wave (e.g. wave 30) just advances to the next wave.
+            if (this.waveIndex >= waveConfigs.length - 1) {
+                this.showVictory();
+            } else {
+                this.time.delayedCall(1200, () => { this.advanceWave(); });
+            }
         } else {
             // Update health bar to show remaining mini-bosses
             const remaining = 4 - this._bossPhase2Count;
@@ -2710,10 +2864,23 @@ class GameScene extends Phaser.Scene {
     startBossWave() {
         if (!this.currentWave.bossWave || this.bossActive) return;
 
+        // Wave 15: Echo Wraith — unique dashing/shooting boss with its own spawn method
+        if (this.currentWave.echoWraithWave) {
+            this.enemies.clear(true, true);
+            this.relics.clear(true, true);
+            if (this.splitterProjectiles) this.splitterProjectiles.clear(true, true);
+            if (this.bossWarningBar) { this.bossWarningBar.destroy(); this.bossWarningBar = null; }
+            this._activeBoss = this._spawnEchoWraith();
+            this.updateBossHealthUI();
+            this._showWaveAlert('\u26a0 THE ECHO WRAITH APPEARS', '#33aaff');
+            return;
+        }
+
         this.bossActive = true;
         this.enemies.clear(true, true);
         this.relics.clear(true, true);
         if (this.splitterProjectiles) this.splitterProjectiles.clear(true, true);
+
 
         if (this.bossWarningBar) {
             this.bossWarningBar.destroy();
@@ -2940,7 +3107,138 @@ class GameScene extends Phaser.Scene {
             });
         }
     }
+_spawnEchoWraith() {
+    const { width, height } = this.scale;
+    
+    // Create the boss as a physics circle
+    const boss = this.add.circle(width / 2, height / 2, 28, 0xaa00ff);
+    boss.setStrokeStyle(3, 0xffffff);
+    this.physics.add.existing(boss);
+    if (boss.body) {
+        if (boss.body.setCircle) {
+            boss.body.setCircle(28);
+        } else {
+            boss.body.setSize(56, 56);
+        }
+        boss.body.setCollideWorldBounds(true);
+    }
+    boss.hp = this.currentWave.bossMaxHp || 350; 
+    boss.maxHp = this.currentWave.bossMaxHp || 350;
+    boss.isBoss = true;
+    boss.isEchoWraith = true;
 
+    boss._isFrozen = false;
+    boss._cryoResistance = 0.25; // Shakes off cold status faster than normal enemies
+    boss._dashWarningActive = false;
+    this.boss = boss;
+    this.bossActive = true;
+
+    // Separate text display for the health status above its head
+    boss._hpLabel = this.add.text(boss.x, boss.y - 35, `HP: ${boss.hp}`, {
+        fontFamily: 'VT323',
+        fontSize: '18px',
+        color: '#aa00ff'
+    }).setOrigin(0.5).setDepth(20);
+
+    // Keep the health label tracking its moving body position
+    this.events.on('update', () => {
+        if (boss && boss.active && boss._hpLabel) {
+            boss._hpLabel.setPosition(boss.x, boss.y - 35);
+        }
+    });
+
+    // --- NEW TARGETED DASH LOOP ---
+    // Every 2.5 seconds, the boss locks onto the player and fires itself forward like a rocket
+    boss._dashTimer = this.time.addEvent({
+        delay: 2500,
+        loop: true,
+        callback: () => {
+            if (!boss || !boss.active || boss._isFrozen || !this.player || !this.player.active) return;
+
+            // Calculate exact angle and vector straight towards the player
+            const angleToPlayer = Phaser.Math.Angle.Between(boss.x, boss.y, this.player.x, this.player.y);
+            const originalColor = boss.fillColor;
+            boss._dashWarningActive = true;
+            boss.setFillStyle(0xffffff);
+            
+            // 3-tic warning before lunging
+            this.time.delayedCall(300, () => {
+                if (!boss || !boss.active || boss._isFrozen) {
+                    if (boss && boss.active) {
+                        boss.setFillStyle(originalColor);
+                        boss._dashWarningActive = false;
+                    }
+                    return;
+                }
+
+                boss.setFillStyle(originalColor);
+                boss._dashWarningActive = false;
+                
+                // Launch the boss physical body aggressively at the player
+                const dashSpeed = 550;
+                boss.body.setVelocity(
+                    Math.cos(angleToPlayer) * dashSpeed,
+                    Math.sin(angleToPlayer) * dashSpeed
+                );
+
+                // Let it glide for 500ms, then brake hard back to a standstill
+                this.time.delayedCall(500, () => {
+                    if (boss && boss.active && boss.body) {
+                        boss.body.setVelocity(0, 0);
+                    }
+                });
+            });
+        }
+    });
+
+    // --- TIMED COMBAT MODES ---
+    // Alternates shooting configurations every 1.6 seconds from its active position
+    boss._attackToggle = false;
+    boss._attackTimer = this.time.addEvent({
+        delay: 1600,
+        loop: true,
+        callback: () => {
+            if (!boss || !boss.active || !this.player || !this.player.active || boss._isFrozen) return;
+            
+            const angleToPlayer = Phaser.Math.Angle.Between(boss.x, boss.y, this.player.x, this.player.y);
+
+            if (boss._attackToggle) {
+                // ATTACK MODE A: Lightning-fast single sniper projectile
+                this._fireBossProjectile(boss.x, boss.y, angleToPlayer, 450, 0xaa00ff);
+            } else {
+                // ATTACK MODE B: 5-Shot Spread Blast fanning outward
+                const spreadAngle = 0.22; // Radians apart
+                for (let i = -2; i <= 2; i++) {
+                    const finalAngle = angleToPlayer + (i * spreadAngle);
+                    this._fireBossProjectile(boss.x, boss.y, finalAngle, 240, 0xff00ff);
+                }
+            }
+            boss._attackToggle = !boss._attackToggle;
+        }
+    });
+    return boss;
+}
+
+_fireBossProjectile(x, y, angle, speed, color) {
+    // Inject directly into the enemy project group so it triggers damage overlays on your player
+    const group = this.enemyProjectiles || this.physics.add.group();
+    const proj = this.add.rectangle(x, y, 12, 12, color);
+    
+    this.physics.add.existing(proj);
+    group.add(proj);
+    
+    proj.body.setVelocity(
+        Math.cos(angle) * speed,
+        Math.sin(angle) * speed
+    );
+    
+    proj._isEnemyProjectile = true;
+    
+    // Auto-destruct safely after 4 seconds out of bounds
+    this.time.delayedCall(4000, () => { 
+        if (proj && proj.active) proj.destroy(); 
+    });
+}
     advanceWave() {
         // Tick down the one-shot power counter when a wave ends
         if (this._oneShotWavesLeft > 0) {
@@ -3067,20 +3365,27 @@ class GameScene extends Phaser.Scene {
     }
 
     updateWaveUI() {
-        document.getElementById('killCount').innerText = score;
-        document.getElementById('waveNumber').innerText = this.currentWave.title;
-        document.getElementById('waveProgress').innerText = this.currentWave.bossWave ? 'BOSS FIGHT' : this.currentWave.splitterBossWave ? 'CLEAR ALL ENEMIES' : this.currentWave.voidMawWave ? 'DEFEAT THE VOID MAW' : `${this.waveKills} / ${this.currentWave.targetKills}`;
-        document.getElementById('waveHint').innerText = this.currentWave.description;
-        document.getElementById('bossHealthLabel').classList.toggle('hidden', !this.currentWave.bossWave);
-        document.getElementById('boss-health-container').classList.toggle('hidden', !this.currentWave.bossWave);
-
-        if (this.currentWave.bossWave && !this.boss) {
-            document.getElementById('boss-health-fill').style.width = '100%';
-        }
-
-        // Update day/night cycle visuals
-        this.updateDayCycle();
+    document.getElementById('killCount').innerText = score;
+    document.getElementById('waveNumber').innerText = this.currentWave.title;
+    
+    // Dynamically adjust string based on wave type
+    if (this.currentWave.bossWave) {
+        document.getElementById('waveProgress').innerText = 'BOSS FIGHT';
+    } else if (this.currentWave.splitterBossWave) {
+        document.getElementById('waveProgress').innerText = 'CLEAR ALL ENEMIES';
+    } else if (this.currentWave.voidMawWave) {
+        const maw = this._voidMaw;
+        const towersText = (maw && maw._towersAlive > 0) ? ` | 🔒 TOWERS ALIVE: ${maw._towersAlive}` : ' | 🔓 VULNERABLE';
+        document.getElementById('waveProgress').innerText = maw ? `HP: ${maw.hp}${towersText}` : 'DEFEAT THE VOID MAW';
+    } else {
+        document.getElementById('waveProgress').innerText = `${this.waveKills} / ${this.currentWave.targetKills}`;
     }
+    
+    document.getElementById('waveHint').innerText = this.currentWave.description;
+    document.getElementById('bossHealthLabel').classList.toggle('hidden', !this.currentWave.bossWave);
+    document.getElementById('boss-health-container').classList.toggle('hidden', !this.currentWave.bossWave);
+    this.updateDayCycle();
+}
 
     updateDayCycle() {
         // waveIndex 0-7:  full day (arena1 only)
@@ -3621,54 +3926,85 @@ function declineFusionReward() {
 
 let _fusionRecipesAvailable = [];
 let _fusionRecipeIndex = 0;
+let _fusionAllRecipes = [];      // all known recipes for browsing
+let _fusionBrowseScene = null;   // scene ref so we can check ownership when browsing
 
 function _displayFusionRecipe(index) {
-    if (_fusionRecipesAvailable.length === 0) return;
-    _fusionRecipeIndex = Math.max(0, Math.min(index, _fusionRecipesAvailable.length - 1));
-    const recipe = _fusionRecipesAvailable[_fusionRecipeIndex];
+    const allRecipes = _fusionAllRecipes.length > 0 ? _fusionAllRecipes : _fusionRecipesAvailable;
+    if (allRecipes.length === 0) return;
+    _fusionRecipeIndex = Math.max(0, Math.min(index, allRecipes.length - 1));
+    const recipe = allRecipes[_fusionRecipeIndex];
     const fused = recipe.result;
+
+    // Determine if the player currently owns the required ingredients
+    const ownedIds = _fusionBrowseScene ? _fusionBrowseScene.player.relics.map(r => r.id) : [];
+    const canCraft = recipe.requires.every(reqId => ownedIds.includes(reqId));
+
     const isAegis = fused.id === 'aegis_core';
     const modal = document.getElementById('fusion-modal');
     const content = modal.querySelector('.fusion-modal-content');
 
-    modal.classList.toggle('fusion-aegis', isAegis);
-    if (content) content.classList.toggle('fusion-aegis', isAegis);
+    modal.classList.toggle('fusion-aegis', isAegis && canCraft);
+    if (content) content.classList.toggle('fusion-aegis', isAegis && canCraft);
 
-    document.getElementById('fusion-icon').innerText = fused.icon;
-    document.getElementById('fusion-title').innerText = '⚗️ FUSION AVAILABLE';
-    document.getElementById('fusion-ingredients').innerText =
-        recipe.requires
-            .map(id => {
-                const r = relicPool.find(x => x.id === id);
-                return r ? `${r.icon} ${r.name}` : id;
-            })
-            .join('  +  ');
+    document.getElementById('fusion-icon').innerText = canCraft ? fused.icon : '🔒';
+    document.getElementById('fusion-title').innerText = canCraft ? '⚗️ FUSION AVAILABLE' : '🔒 FUSION LOCKED';
+    document.getElementById('fusion-title').style.color = canCraft ? '#ff4444' : '#888888';
+    document.getElementById('fusion-title').style.textShadow = canCraft ? '0 0 20px #ff4444' : 'none';
+
+    // Ingredients: highlight which ones the player has vs. needs
+    const ingredientEl = document.getElementById('fusion-ingredients');
+    if (ingredientEl) {
+        const parts = recipe.requires.map(id => {
+            const r = relicPool.find(x => x.id === id);
+            const label = r ? `${r.icon} ${r.name}` : id;
+            const has = ownedIds.includes(id);
+            return `<span style="color:${has ? '#00ff99' : '#ff6666'};font-weight:bold;" title="${has ? 'You have this' : 'You need this'}">${label}${has ? ' ✔' : ' ✖'}</span>`;
+        });
+        ingredientEl.innerHTML = parts.join('  <span style="color:#aaa">+</span>  ');
+    }
+
     document.getElementById('fusion-name').innerText = fused.name;
+    document.getElementById('fusion-name').style.color = canCraft ? '#ff6666' : '#888888';
     document.getElementById('fusion-description').innerText = fused.description;
+    document.getElementById('fusion-description').style.opacity = canCraft ? '0.9' : '0.5';
+
     const riskNote = document.getElementById('fusion-risk-note');
-    if (riskNote) riskNote.innerText = '⚠️ 5-10% chance to fail and destroy all ingredients when attempting this fusion.';
+    if (riskNote) {
+        riskNote.innerText = canCraft
+            ? '⚠️ 5-10% chance to fail and destroy all ingredients when attempting this fusion.'
+            : '❌ Collect the missing relics (shown in red above) to unlock this fusion.';
+        riskNote.style.color = canCraft ? '#ffaaaa' : '#ff8888';
+    }
     const resultNote = document.getElementById('fusion-result-note');
     if (resultNote) {
         resultNote.innerText = '';
         resultNote.style.display = 'none';
     }
 
-    // Update counter
+    // Show/hide the Fuse button and source-relic note based on ownership
+    const fuseBtn = document.querySelector('#fusion-modal button[onclick="acceptFusion()"]');
+    const srcNote = document.getElementById('fusion-source-note');
+    if (fuseBtn) fuseBtn.style.display = canCraft ? 'inline-block' : 'none';
+    if (srcNote) srcNote.style.display = canCraft ? 'block' : 'none';
+
+    // Update counter (shows all recipes)
     const counter = document.getElementById('fusion-recipe-counter');
-    if (counter) counter.innerText = `${_fusionRecipeIndex + 1} / ${_fusionRecipesAvailable.length}`;
+    if (counter) counter.innerText = `${_fusionRecipeIndex + 1} / ${allRecipes.length}`;
 
     // Update arrow buttons
     const prevBtn = document.getElementById('fusion-prev-btn');
     const nextBtn = document.getElementById('fusion-next-btn');
     if (prevBtn) prevBtn.style.opacity = _fusionRecipeIndex === 0 ? '0.4' : '1';
-    if (nextBtn) nextBtn.style.opacity = _fusionRecipeIndex === _fusionRecipesAvailable.length - 1 ? '0.4' : '1';
+    if (nextBtn) nextBtn.style.opacity = _fusionRecipeIndex === allRecipes.length - 1 ? '0.4' : '1';
 
-    // Store recipe on modal for accept/decline
-    document.getElementById('fusion-modal')._pendingRecipe = recipe;
+    // Only store pending recipe if the player can actually craft it
+    document.getElementById('fusion-modal')._pendingRecipe = canCraft ? recipe : null;
 }
 
 function fusionNextRecipe() {
-    if (_fusionRecipeIndex < _fusionRecipesAvailable.length - 1) {
+    const allRecipes = _fusionAllRecipes.length > 0 ? _fusionAllRecipes : _fusionRecipesAvailable;
+    if (_fusionRecipeIndex < allRecipes.length - 1) {
         _displayFusionRecipe(_fusionRecipeIndex + 1);
     }
 }
@@ -3681,10 +4017,16 @@ function fusionPrevRecipe() {
 
 function showFusionModal(recipe, scene) {
     _fusionRecipesAvailable = checkAllFusionsAvailable(scene.player.relics);
-    _fusionRecipeIndex = 0;
+    _fusionAllRecipes = fusionRecipes; // all possible recipes for browsing
+    _fusionBrowseScene = scene;
+    // Start display at the first craftable recipe if one exists
+    const firstCraftable = fusionRecipes.findIndex(r =>
+        r.requires.every(id => scene.player.relics.some(pr => pr.id === id))
+    );
+    _fusionRecipeIndex = Math.max(0, firstCraftable);
     const modal = document.getElementById('fusion-modal');
     modal.classList.remove('hidden');
-    _displayFusionRecipe(0);
+    _displayFusionRecipe(_fusionRecipeIndex);
     playFusionSound();
 }
 
@@ -4405,33 +4747,17 @@ function offerGraceFusion() {
     // Mark that we're in grace-fusion mode
     _graceScene._graceFusionPending = true;
 
-    const fused = recipe.result;
-    const isAegis = fused.id === 'aegis_core';
-    const modal = document.getElementById('fusion-modal');
-    const content = modal.querySelector('.fusion-modal-content');
-    modal.classList.toggle('fusion-aegis', isAegis);
-    if (content) content.classList.toggle('fusion-aegis', isAegis);
-
-    document.getElementById('fusion-icon').innerText = fused.icon;
-    document.getElementById('fusion-title').innerText = '⚗️ FUSION AVAILABLE';
-    document.getElementById('fusion-ingredients').innerText =
-        recipe.requires
-            .map(id => {
-                const r = relicPool.find(x => x.id === id);
-                return r ? `${r.icon} ${r.name}` : id;
-            })
-            .join('  +  ');
-    document.getElementById('fusion-name').innerText = fused.name;
-    document.getElementById('fusion-description').innerText = fused.description;
-    const riskNote = document.getElementById('fusion-risk-note');
-    if (riskNote) riskNote.innerText = '⚠️ 5-10% chance to fail and destroy all ingredients when attempting this fusion.';
-    const resultNote = document.getElementById('fusion-result-note');
-    if (resultNote) {
-        resultNote.innerText = '';
-        resultNote.style.display = 'none';
-    }
-    document.getElementById('fusion-modal')._pendingRecipe = recipe;
+    // Use the shared showFusionModal path so arrows browse ALL recipes
+    _fusionRecipesAvailable = checkAllFusionsAvailable(_graceScene.player.relics);
+    _fusionAllRecipes = fusionRecipes;
+    _fusionBrowseScene = _graceScene;
+    // Open at the recipe the grace button was configured for
+    const startIdx = fusionRecipes.indexOf(recipe);
+    _fusionRecipeIndex = Math.max(0, startIdx);
     document.getElementById('fusion-modal').classList.remove('hidden');
+    _displayFusionRecipe(_fusionRecipeIndex);
+    // Re-attach the pending recipe (overrides any locked state from _displayFusionRecipe)
+    document.getElementById('fusion-modal')._pendingRecipe = recipe;
     playFusionSound();
 }
 
